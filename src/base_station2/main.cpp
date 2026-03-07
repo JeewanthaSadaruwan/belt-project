@@ -35,185 +35,326 @@ const char DASHBOARD_HTML[] PROGMEM = R"rawliteral(
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg1:#0b1020;
-  --bg2:#0f172a;
-  --panel:#111827;
-  --panel2:#0f172a;
-  --line:#1f2937;
-  --accent:#f97316;
+  --bg:#0b0f1f;
+  --bg2:#0a1224;
+  --panel:#10172b;
+  --panel2:#0b1328;
+  --line:#1e2a44;
+  --accent:#19c2ff;
+  --accent2:#7c3aed;
   --good:#22c55e;
   --warn:#f59e0b;
   --bad:#ef4444;
-  --text:#e5e7eb;
-  --muted:#9ca3af;
+  --text:#e6ebf5;
+  --muted:#93a0ba;
 }
 body{
-  font-family:"Palatino Linotype","Book Antiqua",Palatino,serif;
+  font-family:"Bahnschrift","Gill Sans MT","Trebuchet MS",sans-serif;
   background:
-    radial-gradient(1200px 600px at 20% -10%, #1e293b 0%, #0b1020 60%),
-    linear-gradient(180deg,var(--bg1) 0%, var(--bg2) 100%);
+    radial-gradient(800px 400px at 10% -10%, rgba(25,194,255,.18), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(124,58,237,.18), transparent 55%),
+    linear-gradient(180deg,var(--bg) 0%, var(--bg2) 100%);
   color:var(--text);
   min-height:100vh;
 }
-header{
-  padding:16px 22px;
+.topbar{
+  position:sticky;
+  top:0;
+  z-index:2;
+  padding:18px 24px;
   border-bottom:1px solid var(--line);
   display:flex;
-  gap:12px;
+  gap:16px;
   align-items:center;
   justify-content:space-between;
-  background:linear-gradient(180deg,#0f172a 0%, #0b1020 100%);
+  background:linear-gradient(180deg, rgba(10,18,36,.98) 0%, rgba(11,15,31,.92) 100%);
+  backdrop-filter: blur(6px);
 }
-.logo{
-  font-size:1.3rem;
-  letter-spacing:1px;
+.brand{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.brand .title{
+  font-size:1.4rem;
+  letter-spacing:1.5px;
   text-transform:uppercase;
 }
-.badge{
+.brand .subtitle{
+  font-size:0.85rem;
+  color:var(--muted);
+  letter-spacing:.6px;
+}
+.status-pill{
   display:flex;
   align-items:center;
   gap:10px;
   padding:8px 14px;
   border:1px solid var(--line);
   border-radius:22px;
-  background:#0b1020;
+  background:#0b1226;
   font-size:0.85rem;
+  box-shadow:0 0 0 1px rgba(25,194,255,.08), inset 0 0 20px rgba(25,194,255,.04);
 }
 .dot{
   width:10px;height:10px;border-radius:50%;
   background:var(--bad);
 }
-.dot.on{background:var(--good);box-shadow:0 0 8px rgba(34,197,94,.6)}
-.dot.warn{background:var(--warn);box-shadow:0 0 8px rgba(245,158,11,.6)}
-.container{max-width:1200px;margin:0 auto;padding:18px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.dot.on{background:var(--good);box-shadow:0 0 10px rgba(34,197,94,.6)}
+.dot.warn{background:var(--warn);box-shadow:0 0 10px rgba(245,158,11,.6)}
+.wrap{max-width:1250px;margin:0 auto;padding:20px}
+.layout{
+  display:grid;
+  grid-template-columns:1.1fr 1fr 1fr;
+  grid-template-areas:
+    "status gps gps"
+    "accel gyro system"
+    "raw raw raw";
+  gap:16px;
+}
 .card{
   background:linear-gradient(180deg,var(--panel) 0%, var(--panel2) 100%);
   border:1px solid var(--line);
-  border-radius:16px;
-  overflow:hidden;
+  border-radius:18px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(5,10,25,.35);
 }
-.card h2{
-  padding:14px 18px;
-  font-size:0.95rem;
-  text-transform:uppercase;
-  letter-spacing:1px;
-  border-bottom:1px solid var(--line);
-}
-.kv{
+.card-head{
   display:flex;
+  align-items:center;
   justify-content:space-between;
-  padding:10px 18px;
-  border-bottom:1px dashed #1f2937;
-  font-size:0.95rem;
+  padding-bottom:12px;
+  border-bottom:1px solid rgba(30,42,68,.7);
+  margin-bottom:12px;
 }
-.kv:last-child{border-bottom:none}
-.label{color:var(--muted)}
-.value{font-family:"Consolas","Lucida Console",monospace;font-weight:700}
+.eyebrow{
+  font-size:0.72rem;
+  color:var(--muted);
+  letter-spacing:1.2px;
+  text-transform:uppercase;
+}
+.card-title{
+  font-size:1.05rem;
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
+.chip{
+  font-size:0.8rem;
+  color:var(--muted);
+  padding:4px 10px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:#0b1226;
+}
+.chip .value{margin:0;font-size:0.8rem}
+.stat-grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:12px;
+}
+.stat{
+  background:linear-gradient(180deg, rgba(11,18,38,.8), rgba(11,18,38,.4));
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+}
+.label{color:var(--muted);font-size:0.8rem}
+.value{
+  margin-top:6px;
+  font-family:"Cascadia Mono","Consolas","Lucida Console",monospace;
+  font-weight:700;
+  font-size:1.05rem;
+}
 .value.good{color:var(--good)}
 .value.warn{color:var(--warn)}
 .value.bad{color:var(--bad)}
-.big{font-size:1.5rem}
+.big{font-size:1.9rem;letter-spacing:1px}
+.kv{
+  display:flex;
+  justify-content:space-between;
+  padding:10px 6px;
+  border-bottom:1px dashed rgba(30,42,68,.7);
+  font-size:0.95rem;
+}
+.kv:last-child{border-bottom:none}
 .axis{
   display:grid;
   grid-template-columns:repeat(3,1fr);
   gap:10px;
-  padding:12px 18px 18px;
 }
 .box{
-  background:#0b1020;
+  background:#0b1226;
   border:1px solid var(--line);
-  border-radius:12px;
+  border-radius:14px;
   text-align:center;
-  padding:12px;
+  padding:14px 10px;
+  box-shadow:inset 0 0 20px rgba(25,194,255,.05);
 }
 .axis-label{
-  font-size:0.75rem;
+  font-size:0.72rem;
   color:var(--muted);
   text-transform:uppercase;
   letter-spacing:1px;
 }
 .axis-val{
-  font-size:1.2rem;
-  margin-top:6px;
-  font-family:"Consolas","Lucida Console",monospace;
+  font-size:1.25rem;
+  margin-top:8px;
+  font-family:"Cascadia Mono","Consolas","Lucida Console",monospace;
 }
 .raw{
-  background:#0b1020;
+  background:#0b1226;
   border:1px solid var(--line);
   border-radius:12px;
   padding:12px;
-  font-family:"Consolas","Lucida Console",monospace;
-  font-size:0.8rem;
-  color:#cbd5f5;
-  max-height:200px;
+  font-family:"Cascadia Mono","Consolas","Lucida Console",monospace;
+  font-size:0.82rem;
+  color:#c8d3ee;
+  max-height:240px;
   overflow:auto;
   white-space:pre-wrap;
 }
+.status{grid-area:status}
+.gps{grid-area:gps}
+.accel{grid-area:accel}
+.gyro{grid-area:gyro}
+.system{grid-area:system}
+.rawcard{grid-area:raw}
 .footer{
   text-align:center;
   padding:18px;
-  color:#6b7280;
+  color:#6f7b92;
   font-size:0.8rem;
 }
-@media (max-width:700px){
-  header{flex-direction:column;align-items:flex-start}
+@media (max-width:1100px){
+  .layout{
+    grid-template-columns:1fr 1fr;
+    grid-template-areas:
+      "status gps"
+      "accel gyro"
+      "system system"
+      "raw raw";
+  }
+}
+@media (max-width:780px){
+  .topbar{flex-direction:column;align-items:flex-start}
+  .layout{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "status"
+      "gps"
+      "accel"
+      "gyro"
+      "system"
+      "raw";
+  }
 }
 </style>
 </head>
 <body>
-<header>
-  <div class="logo">Belt Station 2</div>
-  <div class="badge">
+<header class="topbar">
+  <div class="brand">
+    <div class="title">Belt Station 2</div>
+    <div class="subtitle">Field telemetry console</div>
+  </div>
+  <div class="status-pill">
     <div class="dot" id="connDot"></div>
     <span id="connText">Waiting for packets...</span>
   </div>
 </header>
-<div class="container">
-  <div class="grid">
-    <section class="card">
-      <h2>Link Status</h2>
-      <div class="kv"><span class="label">Protocol</span><span class="value" id="protoText">SSE</span></div>
-      <div class="kv"><span class="label">Packets</span><span class="value big" id="pkt">0</span></div>
-      <div class="kv"><span class="label">Last Update</span><span class="value" id="upd">--</span></div>
-      <div class="kv"><span class="label">Packet Age</span><span class="value" id="age">--</span></div>
+<main class="wrap">
+  <div class="layout">
+    <section class="card status">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Link Status</div>
+          <div class="card-title">Telemetry Link</div>
+        </div>
+        <div class="chip">Live</div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat">
+          <div class="label">Protocol</div>
+          <div class="value" id="protoText">HTTP Polling</div>
+        </div>
+        <div class="stat">
+          <div class="label">Packets</div>
+          <div class="value big" id="pkt">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Last Update</div>
+          <div class="value" id="upd">--</div>
+        </div>
+        <div class="stat">
+          <div class="label">Packet Age</div>
+          <div class="value" id="age">--</div>
+        </div>
+      </div>
     </section>
-    <section class="card">
-      <h2>GPS</h2>
-      <div class="kv"><span class="label">Fix</span><span class="value" id="gpsStatus">--</span></div>
+    <section class="card gps">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">GPS</div>
+          <div class="card-title">Position & Fix</div>
+        </div>
+        <div class="chip"><span id="gpsStatus" class="value">--</span></div>
+      </div>
       <div class="kv"><span class="label">Latitude</span><span class="value" id="lat">--</span></div>
       <div class="kv"><span class="label">Longitude</span><span class="value" id="lng">--</span></div>
       <div class="kv"><span class="label">Altitude</span><span class="value" id="alt">--</span></div>
       <div class="kv"><span class="label">Speed</span><span class="value" id="spd">--</span></div>
       <div class="kv"><span class="label">Satellites</span><span class="value" id="sat">--</span></div>
     </section>
-    <section class="card">
-      <h2>Accelerometer (m/s2)</h2>
+    <section class="card accel">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Accelerometer</div>
+          <div class="card-title">m/s²</div>
+        </div>
+        <div class="chip">IMU</div>
+      </div>
       <div class="axis">
         <div class="box"><div class="axis-label">X</div><div class="axis-val" id="ax">--</div></div>
         <div class="box"><div class="axis-label">Y</div><div class="axis-val" id="ay">--</div></div>
         <div class="box"><div class="axis-label">Z</div><div class="axis-val" id="az">--</div></div>
       </div>
     </section>
-    <section class="card">
-      <h2>Gyroscope (rad/s)</h2>
+    <section class="card gyro">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Gyroscope</div>
+          <div class="card-title">rad/s</div>
+        </div>
+        <div class="chip">IMU</div>
+      </div>
       <div class="axis">
         <div class="box"><div class="axis-label">X</div><div class="axis-val" id="gx">--</div></div>
         <div class="box"><div class="axis-label">Y</div><div class="axis-val" id="gy">--</div></div>
         <div class="box"><div class="axis-label">Z</div><div class="axis-val" id="gz">--</div></div>
       </div>
     </section>
-    <section class="card">
-      <h2>System</h2>
-      <div class="kv"><span class="label">IMU</span><span class="value" id="imuSt">--</span></div>
+    <section class="card system">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">System</div>
+          <div class="card-title">Device Health</div>
+        </div>
+        <div class="chip">IMU</div>
+      </div>
+      <div class="kv"><span class="label">IMU Status</span><span class="value" id="imuSt">--</span></div>
       <div class="kv"><span class="label">Temperature</span><span class="value" id="temp">--</span></div>
     </section>
-    <section class="card">
-      <h2>Raw JSON</h2>
+    <section class="card rawcard">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Raw</div>
+          <div class="card-title">JSON Stream</div>
+        </div>
+        <div class="chip">/api/data</div>
+      </div>
       <div class="raw" id="raw">{}</div>
     </section>
   </div>
-</div>
+</main>
 <div class="footer">HTTP receiver + dashboard (no internet required)</div>
 <script>
 var connDot = document.getElementById('connDot');
