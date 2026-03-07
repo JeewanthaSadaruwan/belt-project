@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Belt Station - Enhanced Dashboard</title>
+    
+    <!-- Leaflet CSS for Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Chart.js for Graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    
+    <!-- Leaflet JS for Maps -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="enhanced-styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🎯</span>
+                    <h1>Belt Station</h1>
+                </div>
+                <div class="connection-status" id="connectionStatus">
+                    <div class="status-indicator"></div>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+        
+        <!-- Navigation Card (Priority) -->
+        <div class="card nav-card" id="navCard" style="display: none;">
+            <div class="card-header">
+                <div class="header-left">
+                    <h2>🧭 Haptic Navigation</h2>
+                    <span class="badge" id="navBadge">Active</span>
+                </div>
+                <button class="icon-btn" onclick="resetNavigation()">🔄</button>
+            </div>
+            <div class="card-body">
+                <div class="nav-grid">
+                    <div class="nav-metric">
+                        <div class="metric-icon">📍</div>
+                        <div class="metric-info">
+                            <span class="metric-label">Distance</span>
+                            <span class="metric-value" id="navDistance">--</span>
+                        </div>
+                    </div>
+                    <div class="nav-metric">
+                        <div class="metric-icon">🧭</div>
+                        <div class="metric-info">
+                            <span class="metric-label">Bearing</span>
+                            <span class="metric-value" id="navBearing">--</span>
+                        </div>
+                    </div>
+                    <div class="nav-metric">
+                        <div class="metric-icon">🎯</div>
+                        <div class="metric-info">
+                            <span class="metric-label">Heading</span>
+                            <span class="metric-value" id="navHeading">--</span>
+                        </div>
+                    </div>
+                    <div class="nav-metric">
+                        <div class="metric-icon" id="navMotorIcon">⬆️</div>
+                        <div class="metric-info">
+                            <span class="metric-label">Direction</span>
+                            <span class="metric-value" id="navActiveMotor">--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="compass-container">
+                    <canvas id="compassCanvas" width="200" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="dashboard-grid">
+            
+            <!-- GPS Map Card -->
+            <div class="card map-card">
+                <div class="card-header">
+                    <h2>🗺️ GPS Location</h2>
+                    <div class="gps-quality" id="gpsQuality">
+                        <span class="satellite-icon">🛰️</span>
+                        <span id="satCount">0</span>
+                    </div>
+                </div>
+                <div class="card-body no-padding">
+                    <div id="map" class="map-container"></div>
+                    <div class="gps-info">
+                        <div class="info-row">
+                            <span class="info-label">Coordinates:</span>
+                            <span class="info-value" id="gpsCoords">--, --</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Altitude:</span>
+                            <span class="info-value" id="gpsAlt">-- m</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Speed:</span>
+                            <span class="info-value" id="gpsSpeed">-- km/h</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Accelerometer Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📊 Accelerometer</h2>
+                </div>
+                <div class="card-body">
+                    <canvas id="accelChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Gyroscope Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔄 Gyroscope</h2>
+                </div>
+                <div class="card-body">
+                    <canvas id="gyroChart"></canvas>
+                </div>
+            </div>
+
+            <!-- System Info Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>⚡ System Info</h2>
+                </div>
+                <div class="card-body">
+                    <div class="stat-row">
+                        <span class="stat-label">🌡️ Temperature</span>
+                        <span class="stat-value" id="imuTemp">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">📡 Signal Strength</span>
+                        <span class="stat-value" id="signalStrength">--</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">📦 Packets Received</span>
+                        <span class="stat-value" id="packetCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">⏱️ Last Update</span>
+                        <span class="stat-value" id="lastUpdate">Never</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>Belt Station Enhanced Dashboard &copy; 2026</p>
+        </div>
+    </footer>
+
+    <script src="enhanced-app.js"></script>
+</body>
+</html>

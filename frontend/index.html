@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Belt Monitoring Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Belt Monitoring System</h1>
+            <div class="connection-info">
+                <span id="connectionStatus" class="status-dot disconnected"></span>
+                <span id="connectionText">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-card">
+                <div class="status-label">Packets Received</div>
+                <div class="status-value" id="packetsReceived">0</div>
+            </div>
+            <div class="status-card">
+                <div class="status-label">Last Update</div>
+                <div class="status-value" id="lastUpdate">Never</div>
+            </div>
+            <div class="status-card">
+                <div class="status-label">Signal Quality</div>
+                <div class="status-value" id="signalQuality">--</div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Grid -->
+        <div class="dashboard-grid">
+            <!-- GPS Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📍 GPS Location</h2>
+                    <span class="badge" id="gpsBadge">Waiting...</span>
+                </div>
+                <div class="card-body">
+                    <div class="data-row">
+                        <span class="label">Latitude</span>
+                        <span class="value" id="gpsLat">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Longitude</span>
+                        <span class="value" id="gpsLng">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Altitude</span>
+                        <span class="value" id="gpsAlt">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Speed</span>
+                        <span class="value" id="gpsSpeed">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Satellites</span>
+                        <span class="value" id="gpsSats">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Accelerometer Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📊 Accelerometer</h2>
+                    <span class="badge" id="imuBadge">Waiting...</span>
+                </div>
+                <div class="card-body">
+                    <div class="data-row">
+                        <span class="label">X-Axis</span>
+                        <span class="value" id="accelX">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Y-Axis</span>
+                        <span class="value" id="accelY">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Z-Axis</span>
+                        <span class="value" id="accelZ">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Magnitude</span>
+                        <span class="value" id="accelMag">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gyroscope Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔄 Gyroscope</h2>
+                </div>
+                <div class="card-body">
+                    <div class="data-row">
+                        <span class="label">X-Axis</span>
+                        <span class="value" id="gyroX">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Y-Axis</span>
+                        <span class="value" id="gyroY">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Z-Axis</span>
+                        <span class="value" id="gyroZ">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Temperature</span>
+                        <span class="value" id="imuTemp">--</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Navigation Card (for haptic navigation example) -->
+            <div class="card" id="navCard" style="display: none;">
+                <div class="card-header">
+                    <h2>🧭 Haptic Navigation</h2>
+                    <span class="badge" id="navBadge">Active</span>
+                </div>
+                <div class="card-body">
+                    <div class="data-row">
+                        <span class="label">Distance to Base</span>
+                        <span class="value" id="navDistance">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Bearing to Base</span>
+                        <span class="value" id="navBearing">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Current Heading</span>
+                        <span class="value" id="navHeading">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Active Motor</span>
+                        <span class="value" id="navActiveMotor">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Base Station</span>
+                        <span class="value" id="navBaseCoords">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="settings-panel">
+            <h3>⚙️ Connection Settings</h3>
+            <div class="settings-input">
+                <label for="espIP">ESP32 Base Station IP:</label>
+                <input type="text" id="espIP" value="192.168.4.1" placeholder="192.168.4.1">
+                <button onclick="connectToESP()">Connect</button>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer>
+            <p>Belt Monitoring System v1.0 | Real-time Data Visualization</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
