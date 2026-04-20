@@ -21,6 +21,12 @@ int packetsReceived = 0;
 unsigned long lastHttpLog = 0;
 unsigned long lastPacketMs = 0;
 
+// Base station target coordinates (updated via /api/setbase from dashboard)
+double storedBaseLat = 6.934200;
+double storedBaseLng = 79.850600;
+bool   baseLocationConfirmed = false;
+bool   navEnabled = false;  // true once user presses START NAVIGATION on dashboard
+
 // =====================================================================
 //  TACTICAL HUD DASHBOARD  (no external dependencies — local AP only)
 // =====================================================================
@@ -107,7 +113,7 @@ body{
 
 .row{display:grid;gap:14px}
 .row-top{grid-template-columns:1fr 280px 1fr}
-.row-mid{grid-template-columns:1fr 1fr 1fr 1fr}
+.row-mid{grid-template-columns:1.5fr 1fr;grid-template-rows:auto auto;grid-template-areas:"gps hr" "tilt gyro"}
 .row-bot{grid-template-columns:1fr 1fr}
 
 /* ── Panel base ── */
@@ -310,7 +316,8 @@ body{
   .row-bot{grid-template-columns:1fr}
 }
 @media(max-width:680px){
-  .row-top,.row-mid,.row-bot{grid-template-columns:1fr}
+  .row-top,.row-bot{grid-template-columns:1fr}
+  .row-mid{grid-template-columns:1fr;grid-template-areas:"gps" "hr" "tilt" "gyro"}
   .topbar{flex-direction:column;gap:8px;align-items:flex-start}
 }
 </style>
@@ -344,7 +351,20 @@ body{
         <div><div class="ph-label">Navigation</div><div class="ph-title">Direction Cue</div></div>
         <span class="tag" id="hdgSrcTag">SRC: --</span>
       </div>
-      <div class="nav-state-panel">
+
+      <!-- STANDBY: shown until user presses START -->
+      <div id="navStandby" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;gap:14px">
+        <div style="font-size:.72rem;letter-spacing:3px;color:var(--muted);text-transform:uppercase;text-align:center">USER NOT STARTED</div>
+        <div style="font-size:.65rem;letter-spacing:1.5px;color:var(--dim);text-align:center">Sensor data streaming — press START to begin navigation</div>
+        <button onclick="startNav()" id="startNavBtn"
+          style="background:rgba(255,61,87,.12);border:2px solid rgba(255,61,87,.7);color:#ff3d57;padding:14px 0;font-family:var(--font);font-size:.85rem;letter-spacing:3px;border-radius:5px;cursor:pointer;width:100%;transition:all .2s;text-shadow:0 0 12px rgba(255,61,87,.5)"
+          onmouseover="this.style.background='rgba(255,61,87,.28)'" onmouseout="this.style.background='rgba(255,61,87,.12)'">
+          &#9654; START NAVIGATION
+        </button>
+      </div>
+
+      <!-- ACTIVE: shown when navigation is running -->
+      <div class="nav-state-panel" id="navActive" style="display:none">
         <div class="dir-arrow-wrap">
           <svg id="dirArrowSvg" width="90" height="90" viewBox="-45 -45 90 90">
             <defs>
@@ -353,17 +373,20 @@ body{
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
             </defs>
-            <!-- Arrow pointing up by default — rotated by JS via rel_bearing -->
             <polygon id="dirArrow"
               points="0,-36 12,-12 4,-12 4,36 -4,36 -4,-12 -12,-12"
               fill="#00e676" filter="url(#glow)" opacity="0.9"/>
-            <!-- Center ring -->
             <circle r="5" fill="none" stroke="#00e676" stroke-width="1.5" opacity="0.5"/>
           </svg>
           <div class="dir-label" id="relBearLabel">REL BEARING: --</div>
         </div>
         <div class="nav-state-text nogps" id="navStateText">AWAITING GPS</div>
         <div style="font-size:.7rem;letter-spacing:2px;color:var(--muted);text-align:center" id="navSubtext">--</div>
+        <button onclick="stopNav()"
+          style="margin-top:10px;background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.4);color:#ffab00;padding:7px 22px;font-family:var(--font);font-size:.68rem;letter-spacing:2px;border-radius:4px;cursor:pointer;transition:background .2s"
+          onmouseover="this.style.background='rgba(255,171,0,.22)'" onmouseout="this.style.background='rgba(255,171,0,.08)'">
+          &#9632; STOP NAV
+        </button>
       </div>
     </div>
 
@@ -409,9 +432,8 @@ body{
   <div class="row row-mid">
 
     <!-- GPS -->
-    <div class="panel">
-      <div class="ph">
-        <div><div class="ph-label">Satellite</div><div class="ph-title">GPS Fix</div></div>
+    <div class="panel" style="grid-area:gps">
+      <div class="ph"><div class="ph-title">GPS Fix</div></div>
         <span class="tag" id="gpsFixTag">NO FIX</span>
       </div>
       <div class="gps-grid">
@@ -444,7 +466,7 @@ body{
     </div>
 
     <!-- IMU tilt bubble -->
-    <div class="panel">
+    <div class="panel" style="grid-area:tilt">
       <div class="ph">
         <div><div class="ph-label">Accelerometer</div><div class="ph-title">Tilt / Accel</div></div>
         <span class="tag" id="imuTag">IMU</span>
@@ -469,7 +491,7 @@ body{
     </div>
 
     <!-- Gyro bars -->
-    <div class="panel">
+    <div class="panel" style="grid-area:gyro">
       <div class="ph">
         <div><div class="ph-label">Gyroscope</div><div class="ph-title">Angular Rate</div></div>
         <span class="tag">rad/s</span>
@@ -514,7 +536,7 @@ body{
     </div>
 
     <!-- Heart rate -->
-    <div class="panel">
+    <div class="panel" style="grid-area:hr">
       <div class="ph">
         <div><div class="ph-label">MAX30102</div><div class="ph-title">Heart Rate</div></div>
         <span class="tag" id="hrTag">HR SENSOR</span>
@@ -558,6 +580,42 @@ body{
       </div>
       <div class="raw-box" id="rawJson">{}</div>
     </div>
+  </div>
+
+  <!-- BASE STATION LOCATION SETTER -->
+  <div class="panel" id="baseSetPanel" style="order:-1;border-color:rgba(255,61,87,.4)">
+    <div class="ph">
+      <div><div class="ph-label">Navigation Prerequisite</div><div class="ph-title">Base Station Location</div></div>
+      <span class="tag red" id="baseSetTag">SET REQUIRED</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div class="gps-stat">
+        <div class="gs-label">Current Latitude</div>
+        <div class="gs-val green" id="base-cur-lat">6.934200</div>
+      </div>
+      <div class="gps-stat">
+        <div class="gs-label">Current Longitude</div>
+        <div class="gs-val green" id="base-cur-lng">79.850600</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:flex-end">
+      <div>
+        <div class="gs-label" style="margin-bottom:5px">New Latitude</div>
+        <input id="inp-lat" type="number" step="0.000001" placeholder="e.g. 6.927079"
+          style="width:100%;background:#040810;border:1px solid #0d1f3a;color:#c8d8f0;padding:8px 10px;font-family:var(--font);font-size:.8rem;border-radius:4px;letter-spacing:1px;outline:none">
+      </div>
+      <div>
+        <div class="gs-label" style="margin-bottom:5px">New Longitude</div>
+        <input id="inp-lng" type="number" step="0.000001" placeholder="e.g. 79.861244"
+          style="width:100%;background:#040810;border:1px solid #0d1f3a;color:#c8d8f0;padding:8px 10px;font-family:var(--font);font-size:.8rem;border-radius:4px;letter-spacing:1px;outline:none">
+      </div>
+      <button onclick="setBase()"
+        style="background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.4);color:#00e676;padding:8px 18px;font-family:var(--font);font-size:.72rem;letter-spacing:2px;border-radius:4px;cursor:pointer;white-space:nowrap;transition:background .2s"
+        onmouseover="this.style.background='rgba(0,230,118,.2)'" onmouseout="this.style.background='rgba(0,230,118,.1)'">
+        &#9654; SET BASE
+      </button>
+    </div>
+    <div id="base-msg" style="font-size:.72rem;letter-spacing:1.5px;color:var(--muted);text-align:right;margin-top:8px"></div>
   </div>
 
 </main>
@@ -809,8 +867,12 @@ function updateNavState(state, relBearing, dist) {
   else if(state.indexOf('ARRIVED')>=0){ cls='arrived'; txt='&#10003; ARRIVED';    subTxt='TARGET REACHED'; tag.textContent='ARRIVED'; tag.className='tag green'; }
   else if(state.indexOf('NO GPS')>=0) { cls='nogps';   txt='NO GPS FIX'; subTxt='WAITING FOR LOCK'; }
   else if(state.indexOf('WALK')>=0)   { cls='nogps';   txt='START WALKING'; subTxt='NEED HEADING LOCK'; }
+  else if(state.indexOf('SET BASE')>=0){ cls='nogps';   txt='&#128273; BASE REQUIRED'; subTxt='SET BASE LOCATION ABOVE'; }
+  else if(state.indexOf('STANDBY')>=0){ cls='nogps';   txt='&#9632; STANDBY'; subTxt='PRESS START NAVIGATION'; }
 
-  if(state && state.indexOf('ARRIVED')<0){ tag.textContent='EN ROUTE'; tag.className='tag amber'; }
+  if(state && state.indexOf('ARRIVED')<0 && state.indexOf('SET BASE')<0 && state.indexOf('STANDBY')<0){ tag.textContent='EN ROUTE'; tag.className='tag amber'; }
+  if(state && state.indexOf('SET BASE')>=0){ tag.textContent='LOCKED'; tag.className='tag red'; }
+  if(state && state.indexOf('STANDBY')>=0){ tag.textContent='STANDBY'; tag.className='tag'; }
 
   el.className = 'nav-state-text ' + cls;
   el.innerHTML = txt;
@@ -987,6 +1049,26 @@ function updateUI(d) {
 
   // ── Raw JSON ──
   document.getElementById('rawJson').textContent = JSON.stringify(d, null, 2);
+
+  // ── Base station coords + navigation lock status ──
+  if (d.base_lat !== undefined) {
+    document.getElementById('base-cur-lat').textContent = (+d.base_lat).toFixed(6);
+    document.getElementById('base-cur-lng').textContent = (+d.base_lng).toFixed(6);
+  }
+  if (d.base_confirmed !== undefined) {
+    var bTag = document.getElementById('baseSetTag');
+    var bPanel = document.getElementById('baseSetPanel');
+    if (d.base_confirmed) {
+      bTag.textContent = 'NAV ACTIVE'; bTag.className = 'tag green';
+      if (bPanel) bPanel.style.borderColor = 'rgba(0,230,118,.4)';
+    } else {
+      bTag.textContent = 'SET REQUIRED'; bTag.className = 'tag red';
+      if (bPanel) bPanel.style.borderColor = 'rgba(255,61,87,.4)';
+    }
+  }
+  if (d.nav_enabled !== undefined && d.nav_enabled !== navRunning) {
+    setNavRunning(d.nav_enabled);
+  }
 }
 
 // ── Age updater ───────────────────────────────────────────────
@@ -1011,6 +1093,67 @@ setInterval(function(){
       document.getElementById('connText').textContent = 'DISCONNECTED';
     });
 }, 2000);
+
+// ── Navigation start/stop ────────────────────────────────
+var navRunning = false;
+function setNavRunning(active) {
+  navRunning = active;
+  document.getElementById('navStandby').style.display = active ? 'none' : 'flex';
+  document.getElementById('navActive').style.display  = active ? 'flex' : 'none';
+}
+function startNav() {
+  fetch('/api/navstart', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){return r.json()})
+    .then(function(d){ if(d.ok) setNavRunning(true); })
+    .catch(function(){ /* offline demo */ setNavRunning(true); });
+}
+function stopNav() {
+  fetch('/api/navstop', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){return r.json()})
+    .then(function(d){ if(d.ok) setNavRunning(false); })
+    .catch(function(){ setNavRunning(false); });
+}
+
+// ── Set base station coordinates ─────────────────────────────
+function setBase() {
+  var lat = parseFloat(document.getElementById('inp-lat').value);
+  var lng = parseFloat(document.getElementById('inp-lng').value);
+  var msg = document.getElementById('base-msg');
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    msg.style.color = '#ff3d57';
+    msg.textContent = 'INVALID COORDINATES';
+    return;
+  }
+  msg.style.color = '#ffab00';
+  msg.textContent = 'SENDING...';
+  fetch('/api/setbase', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({lat: lat, lng: lng})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.ok) {
+      msg.style.color = '#00e676';
+      msg.textContent = 'BASE SET ✓  ' + lat.toFixed(6) + ', ' + lng.toFixed(6);
+      document.getElementById('base-cur-lat').textContent = lat.toFixed(6);
+      document.getElementById('base-cur-lng').textContent = lng.toFixed(6);
+      document.getElementById('inp-lat').value = '';
+      document.getElementById('inp-lng').value = '';
+      var bTag = document.getElementById('baseSetTag');
+      var bPanel = document.getElementById('baseSetPanel');
+      if(bTag){ bTag.textContent='NAV ACTIVE'; bTag.className='tag green'; }
+      if(bPanel) bPanel.style.borderColor='rgba(0,230,118,.4)';
+    } else {
+      msg.style.color = '#ff3d57';
+      msg.textContent = 'ERROR: ' + (d.error || 'unknown');
+    }
+  })
+  .catch(function() {
+    msg.style.color = '#ff3d57';
+    msg.textContent = 'FAILED — CHECK CONNECTION';
+  });
+}
 
 // ── Initial draw (empty state) ────────────────────────────────
 drawCompass(null, null);
@@ -1056,8 +1199,12 @@ bool updateFromJson(const String &body) {
     return false;
   }
   packetsReceived++;
-  doc["timestamp"] = millis();
-  doc["packetNum"] = packetsReceived;
+  doc["timestamp"]  = millis();
+  doc["packetNum"]  = packetsReceived;
+  doc["base_lat"]       = storedBaseLat;
+  doc["base_lng"]       = storedBaseLng;
+  doc["base_confirmed"] = baseLocationConfirmed;
+  doc["nav_enabled"]    = navEnabled;
   latestDataStr = "";
   serializeJson(doc, latestDataStr);
   lastPacketMs = millis();
@@ -1102,7 +1249,16 @@ void sendApiData() {
   if (server.method() == HTTP_OPTIONS) { server.send(204,"text/plain",""); return; }
 
   if (server.method() == HTTP_GET) {
-    server.send(200, "application/json", latestDataStr);
+    // Always inject fresh base coords (may have changed since last POST)
+    StaticJsonDocument<1200> tmp;
+    deserializeJson(tmp, latestDataStr);
+    tmp["base_lat"]       = storedBaseLat;
+    tmp["base_lng"]       = storedBaseLng;
+    tmp["base_confirmed"] = baseLocationConfirmed;
+    tmp["nav_enabled"]    = navEnabled;
+    String out;
+    serializeJson(tmp, out);
+    server.send(200, "application/json", out);
     return;
   }
 
@@ -1144,6 +1300,49 @@ void setup() {
   server.on("/",              HTTP_ANY, [](){sendDashboard();});
   server.on("/index.html",    HTTP_ANY, [](){sendDashboard();});
   server.on("/api/data",      HTTP_ANY, [](){sendApiData();});
+  server.on("/api/setbase",   HTTP_ANY, [](){
+    server.sendHeader("Access-Control-Allow-Origin",  "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (server.method() == HTTP_OPTIONS) { server.send(204,"text/plain",""); return; }
+    if (server.method() != HTTP_POST)    { server.send(405,"text/plain","Method Not Allowed"); return; }
+    String body = server.arg("plain");
+    StaticJsonDocument<128> doc;
+    if (deserializeJson(doc, body) || !doc.containsKey("lat") || !doc.containsKey("lng")) {
+      server.send(400,"application/json","{\"error\":\"invalid_json\"}");
+      return;
+    }
+    double lat = doc["lat"];
+    double lng = doc["lng"];
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      server.send(400,"application/json","{\"error\":\"out_of_range\"}");
+      return;
+    }
+    storedBaseLat = lat;
+    storedBaseLng = lng;
+    baseLocationConfirmed = true;
+    Serial.printf("[BASE] Coordinates confirmed: %.6f, %.6f \u2014 navigation enabled\n", storedBaseLat, storedBaseLng);
+    String resp = "{\"ok\":true,\"lat\":" + String(storedBaseLat, 6) + ",\"lng\":" + String(storedBaseLng, 6) + "}";
+    server.send(200, "application/json", resp);
+  });
+  server.on("/api/navstart", HTTP_ANY, [](){
+    server.sendHeader("Access-Control-Allow-Origin",  "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (server.method() == HTTP_OPTIONS) { server.send(204,"text/plain",""); return; }
+    navEnabled = true;
+    Serial.println("[NAV] Navigation STARTED by dashboard");
+    server.send(200, "application/json", "{\"ok\":true,\"nav_enabled\":true}");
+  });
+  server.on("/api/navstop", HTTP_ANY, [](){
+    server.sendHeader("Access-Control-Allow-Origin",  "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (server.method() == HTTP_OPTIONS) { server.send(204,"text/plain",""); return; }
+    navEnabled = false;
+    Serial.println("[NAV] Navigation STOPPED by dashboard");
+    server.send(200, "application/json", "{\"ok\":true,\"nav_enabled\":false}");
+  });
   server.on("/generate_204",  HTTP_GET, [](){server.send(204,"text/plain","");});
   server.on("/gen_204",       HTTP_GET, [](){server.send(204,"text/plain","");});
   server.on("/hotspot-detect.html", HTTP_GET, [](){

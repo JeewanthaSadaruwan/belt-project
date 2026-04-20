@@ -46,7 +46,12 @@
 #define WIFI_PASSWORD        "belt12345"
 #define BASE_STATION_URL     "http://192.168.4.1/api/data"
 #define HTTP_POST_INTERVAL_MS  2000   // send telemetry every 2 s
-
+// ── Wired UART → Mesh Node ESP32 ─────────────────────────────
+// Belt TX (GPIO4) → Mesh Node RX (GPIO16)
+// Sends compact JSON every 2s so the mesh node can broadcast
+// real sensor data instead of random values.
+#define MESH_UART_TX     4
+#define MESH_UART_BAUD   115200
 // ── HMC5883L I2C Address & Registers ────────────────────────
 #define MAG_ADDR      0x1E
 #define MAG_REG_CFG_A 0x00
@@ -456,12 +461,31 @@ static unsigned long last_post_ms = 0;
  * @brief  Serialise all telemetry to JSON and HTTP POST to the base station.
  *         Rate-limited to HTTP_POST_INTERVAL_MS.  Reconnects WiFi if dropped.
  */
+// ── Send compact JSON to mesh node over Serial1 (wired) ─────
+void sendToMeshNode(float heading, float dist, float rel_angle, float temp_c) {
+  StaticJsonDocument<256> doc;
+  doc["lat"]     = gpsData.locValid ? gpsData.latitude  : 0.0;
+  doc["lon"]     = gpsData.locValid ? gpsData.longitude : 0.0;
+  doc["heading"] = heading;
+  doc["dist"]    = dist;
+  doc["rel"]     = rel_angle;
+  doc["temp"]    = temp_c;
+  doc["sats"]    = gpsData.satellites;
+  doc["gps"]     = gpsData.locValid ? 1 : 0;
+  String out;
+  serializeJson(doc, out);
+  Serial1.println(out);  // newline terminates the JSON packet
+}
+
 void postTelemetry(float ax, float ay, float az,
                    float gx, float gy, float gz,
                    float temp_c,
                    float heading, float bearing, float rel_angle, float dist) {
   if (millis() - last_post_ms < HTTP_POST_INTERVAL_MS) return;
   last_post_ms = millis();
+
+  // Always send to mesh node over wired UART (no WiFi needed)
+  sendToMeshNode(heading, dist, rel_angle, temp_c);
 
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
@@ -524,6 +548,10 @@ void postTelemetry(float ax, float ay, float az,
 
 void setup() {
   Serial.begin(115200);
+
+  // ── Serial1 → Mesh Node ESP32 (TX only, GPIO4) ────────────
+  Serial1.begin(MESH_UART_BAUD, SERIAL_8N1, -1, MESH_UART_TX);
+  Serial.println("[MESH] Serial1 TX ready on GPIO4 → Mesh Node");
 
   // ── GPS ────────────────────────────────────────────────────
   initGPS();

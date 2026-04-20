@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BELT NAV — OPS CONSOLE (PREVIEW)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:       #040810;
+  --bg2:      #060c16;
+  --panel:    #080e1c;
+  --panel2:   #060b18;
+  --border:   #0d1f3a;
+  --green:    #00e676;
+  --green2:   #00ff9d;
+  --amber:    #ffab00;
+  --red:      #ff3d57;
+  --blue:     #29b6f6;
+  --purple:   #b388ff;
+  --dim:      #2a3a5a;
+  --text:     #c8d8f0;
+  --muted:    #4a607a;
+  --font:     'Courier New', 'Lucida Console', monospace;
+}
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,230,118,.018) 2px,rgba(0,230,118,.018) 4px);
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+.topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:10px 20px;background:rgba(4,8,16,.96);border-bottom:1px solid var(--border);box-shadow:0 0 30px rgba(0,230,118,.06);}
+.brand{display:flex;flex-direction:column;gap:2px}
+.brand-title{font-size:1.1rem;letter-spacing:4px;color:var(--green);text-transform:uppercase;text-shadow:0 0 18px rgba(0,230,118,.6);}
+.brand-sub{font-size:.7rem;letter-spacing:3px;color:var(--muted)}
+.topbar-right{display:flex;gap:14px;align-items:center}
+.pill{display:flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--border);border-radius:4px;background:rgba(8,14,28,.9);font-size:.72rem;letter-spacing:1.5px;}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.dot.live{background:var(--green);box-shadow:0 0 10px rgba(0,230,118,.8);animation:blink 1.4s infinite}
+.dot.warn{background:var(--amber);box-shadow:0 0 10px rgba(255,171,0,.7)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.wrap{max-width:1400px;margin:0 auto;padding:14px;display:flex;flex-direction:column;gap:14px}
+.row{display:grid;gap:14px}
+.row-top{grid-template-columns:1fr 280px 1fr}
+.row-mid{grid-template-columns:1.5fr 1fr;grid-template-rows:auto auto;grid-template-areas:"gps hr" "tilt gyro"}
+.row-bot{grid-template-columns:1fr 1fr}
+.panel{background:linear-gradient(160deg,var(--panel) 0%,var(--panel2) 100%);border:1px solid var(--border);border-radius:6px;padding:14px;position:relative;overflow:hidden;}
+.panel::before,.panel::after{content:'';position:absolute;width:10px;height:10px;border-color:var(--green);border-style:solid;opacity:.5;}
+.panel::before{top:0;left:0;border-width:1px 0 0 1px}
+.panel::after{bottom:0;right:0;border-width:0 1px 1px 0}
+.ph{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.ph-label{font-size:.65rem;letter-spacing:2.5px;color:var(--muted);text-transform:uppercase}
+.ph-title{font-size:.85rem;letter-spacing:2px;color:var(--text);text-transform:uppercase;margin-top:2px}
+.tag{font-size:.65rem;letter-spacing:1.5px;padding:3px 8px;border:1px solid var(--border);border-radius:3px;color:var(--muted);background:rgba(0,0,0,.4);}
+.tag.green{border-color:rgba(0,230,118,.4);color:var(--green)}
+.tag.amber{border-color:rgba(255,171,0,.4);color:var(--amber)}
+.tag.red{border-color:rgba(255,61,87,.4);color:var(--red)}
+.tag.blue{border-color:rgba(41,182,246,.4);color:var(--blue)}
+.nav-state-panel{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:8px;}
+.nav-state-text{font-size:1.5rem;letter-spacing:4px;text-transform:uppercase;text-align:center;transition:all .3s;}
+.nav-state-text.arrived{color:var(--green);text-shadow:0 0 30px rgba(0,230,118,.8)}
+.nav-state-text.forward{color:var(--green2);text-shadow:0 0 20px rgba(0,255,157,.5)}
+.nav-state-text.turn{color:var(--amber);text-shadow:0 0 20px rgba(255,171,0,.5)}
+.nav-state-text.back{color:var(--red);text-shadow:0 0 20px rgba(255,61,87,.5)}
+.nav-state-text.nogps{color:var(--muted)}
+.dir-arrow-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+#dirArrowSvg{transition:transform .4s ease;filter:drop-shadow(0 0 12px rgba(0,230,118,.5))}
+.dir-label{font-size:.7rem;letter-spacing:2px;color:var(--muted)}
+.compass-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;}
+#compassCanvas{border-radius:50%}
+.compass-vals{display:flex;gap:20px;justify-content:center;font-size:.72rem;letter-spacing:1.5px;color:var(--muted);}
+.compass-vals span{display:flex;flex-direction:column;align-items:center;gap:3px}
+.compass-vals .cv{color:var(--text);font-size:.85rem}
+.dist-panel{display:flex;flex-direction:column;gap:10px}
+.dist-num{font-size:2.6rem;letter-spacing:2px;color:var(--green);text-shadow:0 0 20px rgba(0,230,118,.4);text-align:center;}
+.dist-unit{font-size:.75rem;letter-spacing:2px;color:var(--muted);text-align:center}
+.meter-bar{height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;border:1px solid var(--border);}
+.meter-fill{height:100%;background:linear-gradient(90deg,var(--green),var(--green2));border-radius:3px;transition:width .6s ease;box-shadow:0 0 10px rgba(0,230,118,.4);}
+.dist-rows{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.drow{display:flex;justify-content:space-between;font-size:.75rem;padding:4px 0;border-bottom:1px solid rgba(13,31,58,.8)}
+.drow:last-child{border:none}
+.drow .dk{color:var(--muted);letter-spacing:1px}
+.drow .dv{color:var(--text);font-size:.8rem}
+.drow .dv.green{color:var(--green)}.drow .dv.amber{color:var(--amber)}.drow .dv.red{color:var(--red)}.drow .dv.blue{color:var(--blue)}
+.gps-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gps-stat{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:4px;padding:9px;}
+.gs-label{font-size:.62rem;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase}
+.gs-val{font-size:.9rem;margin-top:4px;color:var(--text)}
+.gs-val.green{color:var(--green)}.gs-val.amber{color:var(--amber)}.gs-val.red{color:var(--red)}
+.sat-bars{display:flex;align-items:flex-end;gap:3px;height:22px;margin-top:4px}
+.sat-bar{width:10px;background:var(--dim);border-radius:2px;transition:all .4s}
+.sat-bar.lit{background:var(--green);box-shadow:0 0 6px rgba(0,230,118,.5)}
+.tilt-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
+#tiltCanvas{border:1px solid var(--border);border-radius:50%}
+.axis-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%}
+.ax-box{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:4px;text-align:center;padding:7px 4px;}
+.ax-lbl{font-size:.6rem;letter-spacing:1.5px;color:var(--muted)}
+.ax-val{font-size:.85rem;margin-top:3px}
+.gyro-bars{display:flex;flex-direction:column;gap:7px;margin-top:4px}
+.gbar-row{display:flex;align-items:center;gap:8px}
+.gbar-label{font-size:.68rem;letter-spacing:1.5px;color:var(--muted);width:16px}
+.gbar-track{flex:1;height:8px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:4px;position:relative;overflow:visible;}
+.gbar-fill{position:absolute;top:0;height:100%;border-radius:4px;transition:all .15s ease;}
+.gbar-center{position:absolute;top:-2px;left:50%;width:1px;height:12px;background:var(--dim)}
+.gbar-val{font-size:.7rem;color:var(--text);width:46px;text-align:right}
+.hr-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+.hr-num{font-size:3rem;letter-spacing:2px;text-align:center;transition:color .3s;}
+.hr-num.active{color:var(--red);text-shadow:0 0 25px rgba(255,61,87,.5)}
+.hr-num.inactive{color:var(--muted)}
+.hr-unit{font-size:.7rem;letter-spacing:2px;color:var(--muted);text-align:center}
+.hr-status{font-size:.72rem;letter-spacing:1.5px;text-align:center;margin-top:2px}
+.hr-status.on{color:var(--red)}.hr-status.off{color:var(--muted)}
+#hrCanvas{border:1px solid var(--border);border-radius:4px}
+.hsrc{display:inline-flex;align-items:center;gap:5px;font-size:.68rem;letter-spacing:1.5px;padding:3px 8px;border:1px solid;border-radius:3px;}
+.hsrc.GPS{border-color:rgba(41,182,246,.5);color:var(--blue)}
+.hsrc.GYRO{border-color:rgba(179,136,255,.5);color:var(--purple)}
+.hsrc.COMP{border-color:rgba(0,230,118,.4);color:var(--green)}
+.hsrc.STALE{border-color:rgba(255,61,87,.4);color:var(--red);animation:blink 1s infinite}
+.hsrc.NONE{border-color:var(--border);color:var(--muted)}
+.raw-box{background:rgba(0,0,0,.5);border:1px solid var(--border);border-radius:4px;padding:10px;font-size:.72rem;color:#5a7a9a;max-height:160px;overflow:auto;white-space:pre-wrap;word-break:break-all;line-height:1.5;}
+.ticker-row{display:flex;gap:16px;overflow:hidden;font-size:.68rem;letter-spacing:1.5px;color:var(--muted);border-top:1px solid var(--border);padding-top:10px;flex-wrap:wrap;}
+.ticker-item{display:flex;gap:6px}
+.tk{color:var(--muted)}.tv{color:var(--text)}
+.pkt-count{font-size:2.4rem;color:var(--blue);text-shadow:0 0 15px rgba(41,182,246,.4);text-align:center;}
+.pkt-label{font-size:.65rem;letter-spacing:2px;color:var(--muted);text-align:center}
+.demo-banner{background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.3);border-radius:4px;padding:6px 14px;font-size:.72rem;letter-spacing:2px;color:var(--amber);text-align:center;margin-bottom:4px;}
+@media(max-width:1100px){.row-top{grid-template-columns:1fr 1fr}.row-mid{grid-template-columns:1fr 1fr}.row-bot{grid-template-columns:1fr}}
+@media(max-width:680px){
+  .row-top,.row-bot{grid-template-columns:1fr}
+  .row-mid{grid-template-columns:1fr;grid-template-areas:"gps" "hr" "tilt" "gyro"}
+  .topbar{flex-direction:column;gap:8px;align-items:flex-start}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-title">&#9632; BELT NAV — OPS CONSOLE</div>
+    <div class="brand-sub">REAL-TIME FIELD TELEMETRY &nbsp;|&nbsp; PREVIEW MODE &nbsp;|&nbsp; DEMO DATA</div>
+  </div>
+  <div class="topbar-right">
+    <div class="pill"><div class="dot live" id="connDot"></div><span id="connText" style="letter-spacing:1.5px">DEMO</span></div>
+    <div class="pill">PKT <span id="pktTop" style="color:#29b6f6;margin-left:4px">0</span></div>
+    <div class="pill">AGE <span id="ageTop" style="color:#ffab00;margin-left:4px">--</span></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="demo-banner">&#9650; PREVIEW MODE — Animated demo data. Connect to ESP32 AP to see real telemetry.</div>
+
+  <div class="row row-top">
+    <div class="panel">
+      <div class="ph">
+        <div><div class="ph-label">Navigation</div><div class="ph-title">Direction Cue</div></div>
+        <span class="tag" id="hdgSrcTag">SRC: --</span>
+      </div>
+
+      <!-- STANDBY: shown until START is pressed -->
+      <div id="navStandby" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px;gap:14px">
+        <div style="font-size:.72rem;letter-spacing:3px;color:var(--muted);text-transform:uppercase;text-align:center">USER NOT STARTED</div>
+        <div style="font-size:.65rem;letter-spacing:1.5px;color:var(--dim);text-align:center">Sensor data streaming &mdash; press START to begin navigation</div>
+        <button onclick="startNav()" id="startNavBtn"
+          style="background:rgba(255,61,87,.12);border:2px solid rgba(255,61,87,.7);color:#ff3d57;padding:14px 0;font-family:var(--font);font-size:.85rem;letter-spacing:3px;border-radius:5px;cursor:pointer;width:100%;transition:all .2s;text-shadow:0 0 12px rgba(255,61,87,.5)"
+          onmouseover="this.style.background='rgba(255,61,87,.28)'" onmouseout="this.style.background='rgba(255,61,87,.12)'">
+          &#9654; START NAVIGATION
+        </button>
+      </div>
+
+      <!-- ACTIVE: shown when navigation is running -->
+      <div class="nav-state-panel" id="navActive" style="display:none">
+        <div class="dir-arrow-wrap">
+          <svg id="dirArrowSvg" width="90" height="90" viewBox="-45 -45 90 90">
+            <defs><filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+            <polygon id="dirArrow" points="0,-36 12,-12 4,-12 4,36 -4,36 -4,-12 -12,-12" fill="#00e676" filter="url(#glow)" opacity="0.9"/>
+            <circle r="5" fill="none" stroke="#00e676" stroke-width="1.5" opacity="0.5"/>
+          </svg>
+          <div class="dir-label" id="relBearLabel">REL BEARING: --</div>
+        </div>
+        <div class="nav-state-text nogps" id="navStateText">AWAITING GPS</div>
+        <div style="font-size:.7rem;letter-spacing:2px;color:var(--muted);text-align:center" id="navSubtext">--</div>
+        <button onclick="stopNav()"
+          style="margin-top:10px;background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.4);color:#ffab00;padding:7px 22px;font-family:var(--font);font-size:.68rem;letter-spacing:2px;border-radius:4px;cursor:pointer;transition:background .2s"
+          onmouseover="this.style.background='rgba(255,171,0,.22)'" onmouseout="this.style.background='rgba(255,171,0,.08)'">
+          &#9632; STOP NAV
+        </button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ph">
+        <div><div class="ph-label">Orientation</div><div class="ph-title">Compass</div></div>
+        <span class="tag blue">FUSED HDG</span>
+      </div>
+      <div class="compass-wrap">
+        <canvas id="compassCanvas" width="200" height="200"></canvas>
+        <div class="compass-vals">
+          <span>HEADING<div class="cv" id="cvHeading">---°</div></span>
+          <span>TO BASE<div class="cv" id="cvBearing">---°</div></span>
+          <span>REL<div class="cv" id="cvRel">---°</div></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ph">
+        <div><div class="ph-label">Target</div><div class="ph-title">Distance</div></div>
+        <span class="tag amber" id="arrivedTag">EN ROUTE</span>
+      </div>
+      <div class="dist-panel">
+        <div class="dist-num" id="distNum">---</div>
+        <div class="dist-unit">METRES TO BASE</div>
+        <div class="meter-bar"><div class="meter-fill" id="distBar" style="width:0%"></div></div>
+        <div class="dist-rows">
+          <div class="drow"><span class="dk">STATE</span><span class="dv" id="dr-state">--</span></div>
+          <div class="drow"><span class="dk">BEARING</span><span class="dv blue" id="dr-bearing">--</span></div>
+          <div class="drow"><span class="dk">SPEED</span><span class="dv" id="dr-speed">--</span></div>
+          <div class="drow"><span class="dk">ALTITUDE</span><span class="dv" id="dr-alt">--</span></div>
+          <div class="drow"><span class="dk">PACKETS RX</span><span class="dv blue" id="dr-pkts">0</span></div>
+          <div class="drow"><span class="dk">LAST PKT</span><span class="dv" id="dr-age">--</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-mid">
+    <div class="panel" style="grid-area:gps">
+      <div class="ph">
+        <div><div class="ph-label">Satellite</div><div class="ph-title">GPS Fix</div></div>
+        <span class="tag green" id="gpsFixTag">VALID FIX</span>
+      </div>
+      <div class="gps-grid">
+        <div class="gps-stat"><div class="gs-label">Latitude</div><div class="gs-val" id="g-lat">--</div></div>
+        <div class="gps-stat"><div class="gs-label">Longitude</div><div class="gs-val" id="g-lng">--</div></div>
+        <div class="gps-stat"><div class="gs-label">Altitude</div><div class="gs-val" id="g-alt">--</div></div>
+        <div class="gps-stat"><div class="gs-label">Speed</div><div class="gs-val" id="g-spd">--</div></div>
+      </div>
+      <div class="gps-stat" style="margin-top:8px">
+        <div class="gs-label">Satellites</div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="gs-val green" id="g-sats">--</div>
+          <div class="sat-bars" id="satBars"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="grid-area:tilt">
+      <div class="ph">
+        <div><div class="ph-label">Accelerometer</div><div class="ph-title">Tilt / Accel</div></div>
+        <span class="tag green" id="imuTag">ACTIVE</span>
+      </div>
+      <div class="tilt-wrap">
+        <canvas id="tiltCanvas" width="140" height="140"></canvas>
+        <div class="axis-grid">
+          <div class="ax-box"><div class="ax-lbl">AX</div><div class="ax-val" id="a-x" style="color:#29b6f6">--</div></div>
+          <div class="ax-box"><div class="ax-lbl">AY</div><div class="ax-val" id="a-y" style="color:#b388ff">--</div></div>
+          <div class="ax-box"><div class="ax-lbl">AZ</div><div class="ax-val" id="a-z" style="color:#00e676">--</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="grid-area:gyro">
+      <div class="ph">
+        <div><div class="ph-label">Gyroscope</div><div class="ph-title">Angular Rate</div></div>
+        <span class="tag">rad/s</span>
+      </div>
+      <div style="margin-top:4px">
+        <div style="font-size:.62rem;letter-spacing:1.5px;color:var(--muted);margin-bottom:10px">ROTATION RATE — DEAD ZONE ±0.01</div>
+        <div class="gyro-bars">
+          <div class="gbar-row"><span class="gbar-label">X</span><div class="gbar-track"><div class="gbar-center"></div><div class="gbar-fill" id="gbx" style="background:#29b6f6"></div></div><span class="gbar-val" id="gv-x" style="color:#29b6f6">--</span></div>
+          <div class="gbar-row"><span class="gbar-label">Y</span><div class="gbar-track"><div class="gbar-center"></div><div class="gbar-fill" id="gby" style="background:#b388ff"></div></div><span class="gbar-val" id="gv-y" style="color:#b388ff">--</span></div>
+          <div class="gbar-row"><span class="gbar-label">Z</span><div class="gbar-track"><div class="gbar-center"></div><div class="gbar-fill" id="gbz" style="background:#00e676"></div></div><span class="gbar-val" id="gv-z" style="color:#00e676">--</span></div>
+        </div>
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+          <div class="dist-rows">
+            <div class="drow"><span class="dk">TEMP</span><span class="dv amber" id="imu-temp">--</span></div>
+            <div class="drow"><span class="dk">BIAS Z</span><span class="dv" id="imu-bias">--</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="grid-area:hr">
+      <div class="ph">
+        <div><div class="ph-label">MAX30102</div><div class="ph-title">Heart Rate</div></div>
+        <span class="tag red" id="hrTag">ACTIVE</span>
+      </div>
+      <div class="hr-wrap">
+        <div class="hr-num active" id="hrNum">---</div>
+        <div class="hr-unit">BPM</div>
+        <div class="hr-status on" id="hrStatus">&#9632; FINGER DETECTED</div>
+        <canvas id="hrCanvas" width="200" height="60"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-bot">
+    <div class="panel">
+      <div class="ph">
+        <div><div class="ph-label">Telemetry</div><div class="ph-title">Live Feed</div></div>
+        <div class="pkt-count" id="pktBig">0</div>
+      </div>
+      <div class="ticker-row" id="ticker">
+        <div class="ticker-item"><span class="tk">TIME</span><span class="tv" id="tk-time">--</span></div>
+        <div class="ticker-item"><span class="tk">GPS</span><span class="tv" id="tk-gps">--</span></div>
+        <div class="ticker-item"><span class="tk">HDG</span><span class="tv" id="tk-hdg">--°</span></div>
+        <div class="ticker-item"><span class="tk">DIST</span><span class="tv" id="tk-dist">-- m</span></div>
+        <div class="ticker-item"><span class="tk">STATE</span><span class="tv" id="tk-state">--</span></div>
+        <div class="ticker-item"><span class="tk">HR</span><span class="tv" id="tk-hr">--</span></div>
+        <div class="ticker-item"><span class="tk">IMU</span><span class="tv" id="tk-imu">--</span></div>
+        <div class="ticker-item"><span class="tk">UPTIME</span><span class="tv" id="tk-uptime">--</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">
+        <div><div class="ph-label">Debug</div><div class="ph-title">JSON Stream</div></div>
+        <span class="tag">/api/data (demo)</span>
+      </div>
+      <div class="raw-box" id="rawJson">{}</div>
+    </div>
+  </div>
+
+  <!-- BASE STATION LOCATION SETTER -->
+  <div class="panel" id="baseSetPanel" style="order:-1;border-color:rgba(255,61,87,.4)">
+    <div class="ph">
+      <div><div class="ph-label">Navigation Prerequisite</div><div class="ph-title">Base Station Location</div></div>
+      <span class="tag red" id="baseSetTag">SET REQUIRED</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div class="gps-stat">
+        <div class="gs-label">Current Latitude</div>
+        <div class="gs-val green" id="base-cur-lat">6.934200</div>
+      </div>
+      <div class="gps-stat">
+        <div class="gs-label">Current Longitude</div>
+        <div class="gs-val green" id="base-cur-lng">79.850600</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:flex-end">
+      <div>
+        <div class="gs-label" style="margin-bottom:5px">New Latitude</div>
+        <input id="inp-lat" type="number" step="0.000001" placeholder="e.g. 6.927079"
+          style="width:100%;background:#040810;border:1px solid #0d1f3a;color:#c8d8f0;padding:8px 10px;font-family:var(--font);font-size:.8rem;border-radius:4px;letter-spacing:1px;outline:none">
+      </div>
+      <div>
+        <div class="gs-label" style="margin-bottom:5px">New Longitude</div>
+        <input id="inp-lng" type="number" step="0.000001" placeholder="e.g. 79.861244"
+          style="width:100%;background:#040810;border:1px solid #0d1f3a;color:#c8d8f0;padding:8px 10px;font-family:var(--font);font-size:.8rem;border-radius:4px;letter-spacing:1px;outline:none">
+      </div>
+      <button onclick="setBase()"
+        style="background:rgba(0,230,118,.1);border:1px solid rgba(0,230,118,.4);color:#00e676;padding:8px 18px;font-family:var(--font);font-size:.72rem;letter-spacing:2px;border-radius:4px;cursor:pointer;white-space:nowrap"
+        onmouseover="this.style.background='rgba(0,230,118,.2)'" onmouseout="this.style.background='rgba(0,230,118,.1)'">
+        &#9654; SET BASE
+      </button>
+    </div>
+    <div id="base-msg" style="font-size:.72rem;letter-spacing:1.5px;color:var(--muted);text-align:right;margin-top:8px">(demo mode — changes won't transmit without ESP32)</div>
+  </div>
+
+</main>
+
+<script>
+// ── Demo data engine ─────────────────────────────────────────
+var t = 0, pktNum = 0, startedAt = Date.now();
+var hrHistory = new Array(100).fill(0);
+var lastPacketAt = 0;
+
+var NAV_STATES = ['>> GO FORWARD <<','>> TURN RIGHT','>> TURN LEFT','** ARRIVED **','>> TURN BACK'];
+var HDG_SRCS   = ['COMP','GYRO','GPS','COMP','COMP'];
+
+function demoData() {
+  t += 0.04; pktNum++;
+  var heading  = (220 + Math.sin(t*0.4)*40 + t*2) % 360;
+  var bearing  = (180 + Math.sin(t*0.15)*60) % 360;
+  var rel      = ((bearing - heading + 540) % 360) - 180;
+  var dist     = 850 + Math.sin(t*0.2)*400;
+  var stateIdx = dist < 15 ? 3 : rel > 45 ? 1 : rel < -45 ? 2 : Math.abs(rel) > 135 ? 4 : 0;
+  var bpm      = 72 + Math.sin(t*0.3)*8;
+  hrHistory.push(bpm); hrHistory.shift();
+  return {
+    packetNum: pktNum,
+    gps: { valid:true, lat:6.927079+Math.sin(t*0.08)*0.001, lng:79.861244+Math.cos(t*0.08)*0.001,
+           alt:12.4+Math.sin(t*0.2)*2, speed:3.2+Math.abs(Math.sin(t*0.4))*2, satellites:8 },
+    imu: { valid:true, accel_x:Math.sin(t*1.1)*0.8, accel_y:Math.cos(t*0.9)*0.6,
+           accel_z:9.81+Math.sin(t*1.3)*0.2, gyro_x:Math.sin(t*2.1)*0.05,
+           gyro_y:Math.cos(t*1.7)*0.04, gyro_z:Math.sin(t*0.8)*0.12, temp:28.5+Math.sin(t*0.05)*1.5 },
+    nav: { fused_heading:heading, bearing:bearing, rel_bearing:rel, distance:dist,
+           state:NAV_STATES[stateIdx], heading_src:HDG_SRCS[pktNum%5], bias_z:0.00032 },
+    hr:  { valid:true, finger:true, bpm:bpm }
+  };
+}
+
+// ── Canvas helpers (same as embedded dashboard) ───────────────
+var compassCv=document.getElementById('compassCanvas'), compassCtx=compassCv.getContext('2d');
+var tiltCv=document.getElementById('tiltCanvas'), tiltCtx=tiltCv.getContext('2d');
+var hrCv=document.getElementById('hrCanvas'), hrCtx=hrCv.getContext('2d');
+
+function drawCompass(heading, bearing) {
+  var cx=100,cy=100,r=90,ctx=compassCtx;
+  ctx.clearRect(0,0,200,200);
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle='#060b18';ctx.fill();
+  ctx.strokeStyle='#0d1f3a';ctx.lineWidth=1.5;ctx.stroke();
+  for(var i=0;i<360;i+=10){
+    var a=(i-90)*Math.PI/180,isMajor=i%90===0,isMid=i%30===0,len=isMajor?14:isMid?9:5;
+    ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*(r-len),cy+Math.sin(a)*(r-len));ctx.lineTo(cx+Math.cos(a)*(r-2),cy+Math.sin(a)*(r-2));
+    ctx.strokeStyle=isMajor?'#00e676':isMid?'#1e4040':'#0d2020';ctx.lineWidth=isMajor?1.5:1;ctx.stroke();
+  }
+  [{l:'N',a:0},{l:'E',a:90},{l:'S',a:180},{l:'W',a:270}].forEach(function(c){
+    var a=(c.a-90)*Math.PI/180,lx=cx+Math.cos(a)*(r-22),ly=cy+Math.sin(a)*(r-22);
+    ctx.font='bold 11px Courier New';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle=c.l==='N'?'#00e676':'#2a5a5a';ctx.fillText(c.l,lx,ly);
+  });
+  if(bearing!==null){
+    var ba=(bearing-90)*Math.PI/180;
+    ctx.beginPath();ctx.setLineDash([5,4]);ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(ba)*(r-6),cy+Math.sin(ba)*(r-6));
+    ctx.strokeStyle='rgba(0,230,118,.5)';ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([]);
+    ctx.beginPath();ctx.arc(cx+Math.cos(ba)*(r-10),cy+Math.sin(ba)*(r-10),4,0,Math.PI*2);ctx.fillStyle='#00e676';ctx.fill();
+  }
+  if(heading!==null){
+    var ha=(heading-90)*Math.PI/180;
+    ctx.beginPath();ctx.moveTo(cx+Math.cos(ha)*(r-8),cy+Math.sin(ha)*(r-8));ctx.lineTo(cx,cy);
+    ctx.strokeStyle='#ffab00';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(cx+Math.cos(ha)*(r-10),cy+Math.sin(ha)*(r-10),5,0,Math.PI*2);ctx.fillStyle='#ffab00';ctx.fill();
+    ctx.beginPath();var ha2=ha+Math.PI;ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(ha2)*18,cy+Math.sin(ha2)*18);
+    ctx.strokeStyle='rgba(255,171,0,.3)';ctx.lineWidth=2;ctx.stroke();
+  }
+  ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fillStyle='#040810';ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy,3,0,Math.PI*2);ctx.fillStyle='#ffab00';ctx.fill();
+}
+
+function drawTilt(ax,ay){
+  var cx=70,cy=70,r=60,ctx=tiltCtx;
+  ctx.clearRect(0,0,140,140);
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle='#040810';ctx.fill();
+  ctx.strokeStyle='#0d1f3a';ctx.lineWidth=1.5;ctx.stroke();
+  [0.3,0.6,1.0].forEach(function(f){ctx.beginPath();ctx.arc(cx,cy,r*f,0,Math.PI*2);ctx.strokeStyle='#0d1f3a';ctx.lineWidth=1;ctx.stroke();});
+  ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.lineTo(cx+r,cy);ctx.moveTo(cx,cy-r);ctx.lineTo(cx,cy+r);ctx.strokeStyle='#0d1f3a';ctx.lineWidth=1;ctx.stroke();
+  var g=9.81,bx=cx+(ay/g)*r*0.8,by=cy+(ax/g)*r*0.8,dx=bx-cx,dy=by-cy,dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist>r*0.85){bx=cx+dx/dist*r*0.85;by=cy+dy/dist*r*0.85;}
+  var grd=ctx.createRadialGradient(bx,by,0,bx,by,16);grd.addColorStop(0,'rgba(0,230,118,.5)');grd.addColorStop(1,'rgba(0,230,118,0)');
+  ctx.beginPath();ctx.arc(bx,by,16,0,Math.PI*2);ctx.fillStyle=grd;ctx.fill();
+  ctx.beginPath();ctx.arc(bx,by,8,0,Math.PI*2);ctx.fillStyle='#00e676';ctx.fill();ctx.strokeStyle='#00ff9d';ctx.lineWidth=1.5;ctx.stroke();
+}
+
+function drawHR(bpm,finger){
+  var w=200,h=60,ctx=hrCtx;
+  ctx.clearRect(0,0,w,h);ctx.fillStyle='rgba(0,0,0,.3)';ctx.fillRect(0,0,w,h);
+  if(!finger||hrHistory.every(function(v){return v===0;})){
+    ctx.strokeStyle='#1e3a5a';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,h/2);ctx.lineTo(w,h/2);ctx.stroke();return;
+  }
+  var step=w/hrHistory.length,max=Math.max.apply(null,hrHistory)||1,min=Math.min.apply(null,hrHistory),range=max-min||1;
+  ctx.strokeStyle='#ff3d57';ctx.lineWidth=1.5;ctx.shadowColor='rgba(255,61,87,.5)';ctx.shadowBlur=6;
+  ctx.beginPath();
+  hrHistory.forEach(function(v,i){var x=i*step,y=h-((v-min)/range)*(h-10)-5;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  ctx.stroke();ctx.shadowBlur=0;
+}
+
+function setGyroBar(fId,vId,val){
+  var fill=document.getElementById(fId),label=document.getElementById(vId),pct=Math.min(Math.abs(val)/4*50,50);
+  if(val>=0){fill.style.left='50%';fill.style.right='auto';fill.style.width=pct+'%';}
+  else{fill.style.right='50%';fill.style.left='auto';fill.style.width=pct+'%';}
+  label.textContent=(val>=0?'+':'')+val.toFixed(3);
+}
+
+function buildSatBars(count){
+  var c=document.getElementById('satBars');c.innerHTML='';
+  for(var i=0;i<12;i++){var b=document.createElement('div');b.className='sat-bar'+(i<count?' lit':'');b.style.height=(10+i*7/12*14)+'px';c.appendChild(b);}
+}
+
+function updateNavState(state,rel){
+  var el=document.getElementById('navStateText'),sub=document.getElementById('navSubtext'),arr=document.getElementById('dirArrowSvg'),poly=document.getElementById('dirArrow');
+  var cls='nogps',txt=state||'AWAITING GPS',subTxt='',color='#4a607a';
+  if(!state){txt='AWAITING GPS';cls='nogps';}
+  else if(state.indexOf('FORWARD')>=0){cls='forward';txt='&#9650; GO FORWARD';subTxt='STAY ON COURSE';color='#00ff9d';}
+  else if(state.indexOf('RIGHT')>=0){cls='turn';txt='&#9654; TURN RIGHT';subTxt='ROTATE RIGHT';color='#ffab00';}
+  else if(state.indexOf('LEFT')>=0){cls='turn';txt='&#9664; TURN LEFT';subTxt='ROTATE LEFT';color='#ffab00';}
+  else if(state.indexOf('BACK')>=0){cls='back';txt='&#9660; TURN AROUND';subTxt='TARGET BEHIND YOU';color='#ff3d57';}
+  else if(state.indexOf('ARRIVED')>=0){cls='arrived';txt='&#10003; ARRIVED';subTxt='TARGET REACHED';color='#00e676';}
+  else if(state.indexOf('SET BASE')>=0){cls='nogps';txt='&#128273; BASE REQUIRED';subTxt='SET BASE LOCATION ABOVE';}
+  else if(state.indexOf('STANDBY')>=0){cls='nogps';txt='&#9632; STANDBY';subTxt='PRESS START NAVIGATION';}
+  el.className='nav-state-text '+cls;el.innerHTML=txt;sub.innerHTML=subTxt;
+  poly.setAttribute('fill',color);arr.style.transform='rotate('+rel+'deg)';
+  var aTag=document.getElementById('arrivedTag');
+  if(state&&state.indexOf('SET BASE')>=0){aTag.textContent='LOCKED';aTag.className='tag red';}
+  else if(state&&state.indexOf('STANDBY')>=0){aTag.textContent='STANDBY';aTag.className='tag';}
+  else if(state&&state.indexOf('ARRIVED')>=0){aTag.textContent='ARRIVED';aTag.className='tag green';}
+  else{aTag.textContent='EN ROUTE';aTag.className='tag amber';}
+}
+
+// ── Main render ───────────────────────────────────────────────
+function render(d) {
+  lastPacketAt=Date.now();
+  var g=d.gps,imu=d.imu,nav=d.nav,hr=d.hr;
+  document.getElementById('pktTop').textContent=d.packetNum;
+  document.getElementById('pktBig').textContent=d.packetNum;
+  document.getElementById('dr-pkts').textContent=d.packetNum;
+  document.getElementById('g-lat').textContent=g.lat.toFixed(6);
+  document.getElementById('g-lng').textContent=g.lng.toFixed(6);
+  document.getElementById('g-alt').textContent=g.alt.toFixed(1)+' m';
+  document.getElementById('g-spd').textContent=g.speed.toFixed(1)+' km/h';
+  document.getElementById('g-sats').textContent=g.satellites+' sats';
+  buildSatBars(g.satellites);
+  document.getElementById('a-x').textContent=imu.accel_x.toFixed(2);
+  document.getElementById('a-y').textContent=imu.accel_y.toFixed(2);
+  document.getElementById('a-z').textContent=imu.accel_z.toFixed(2);
+  setGyroBar('gbx','gv-x',imu.gyro_x);setGyroBar('gby','gv-y',imu.gyro_y);setGyroBar('gbz','gv-z',imu.gyro_z);
+  document.getElementById('imu-temp').textContent=imu.temp.toFixed(1)+' °C';
+  document.getElementById('imu-bias').textContent=nav.bias_z.toFixed(5);
+  drawTilt(imu.accel_x,imu.accel_y);
+  drawCompass(nav.fused_heading,nav.bearing);
+  updateNavState(nav.state,nav.rel_bearing);
+  document.getElementById('cvHeading').textContent=nav.fused_heading.toFixed(1)+'°';
+  document.getElementById('cvBearing').textContent=nav.bearing.toFixed(1)+'°';
+  document.getElementById('cvRel').textContent=(nav.rel_bearing>0?'+':'')+nav.rel_bearing.toFixed(1)+'°';
+  document.getElementById('relBearLabel').textContent='REL BEARING: '+(nav.rel_bearing>0?'+':'')+nav.rel_bearing.toFixed(1)+'°';
+  document.getElementById('distNum').textContent=nav.distance>1000?(nav.distance/1000).toFixed(2)+' km':Math.round(nav.distance);
+  document.getElementById('distBar').style.width=Math.max(0,Math.min(100,(1-nav.distance/25000)*100))+'%';
+  document.getElementById('dr-state').textContent=nav.state.replace(/[<>*]/g,'').trim();
+  document.getElementById('dr-bearing').textContent=nav.bearing.toFixed(1)+'°';
+  document.getElementById('dr-speed').textContent=g.speed.toFixed(1)+' km/h';
+  document.getElementById('dr-alt').textContent=g.alt.toFixed(1)+' m';
+  var hdgEl=document.getElementById('hdgSrcTag');hdgEl.className='hsrc '+nav.heading_src.trim();hdgEl.textContent='HDG: '+nav.heading_src.trim();
+  document.getElementById('hrNum').textContent=Math.round(hr.bpm);
+  document.getElementById('hrNum').className='hr-num active';
+  drawHR(hr.bpm,hr.finger);
+  var now=new Date();
+  document.getElementById('tk-time').textContent=now.toLocaleTimeString();
+  document.getElementById('tk-gps').textContent=g.lat.toFixed(4)+','+g.lng.toFixed(4);
+  document.getElementById('tk-hdg').textContent=nav.fused_heading.toFixed(1)+'°';
+  document.getElementById('tk-dist').textContent=nav.distance>1000?(nav.distance/1000).toFixed(1)+'km':Math.round(nav.distance)+'m';
+  document.getElementById('tk-state').textContent=nav.state.replace(/[<>*]/g,'').trim();
+  document.getElementById('tk-hr').textContent=Math.round(hr.bpm)+' BPM';
+  document.getElementById('tk-imu').textContent='OK T:'+imu.temp.toFixed(1)+'C';
+  var up=Math.floor((Date.now()-startedAt)/1000);document.getElementById('tk-uptime').textContent=Math.floor(up/60)+'m '+(up%60)+'s';
+  document.getElementById('rawJson').textContent=JSON.stringify(d,null,2);
+  document.getElementById('ageTop').textContent='0.0s';document.getElementById('dr-age').textContent='live';
+}
+
+// ── Navigation start/stop ─────────────────────────────
+var navRunning = false;
+function setNavRunning(active) {
+  navRunning = active;
+  document.getElementById('navStandby').style.display = active ? 'none' : 'flex';
+  document.getElementById('navActive').style.display  = active ? 'flex' : 'none';
+}
+function startNav() {
+  // Demo mode: just switch display
+  setNavRunning(true);
+  var bTag = document.getElementById('baseSetTag');
+  var bPanel = document.getElementById('baseSetPanel');
+  if(bTag){ bTag.textContent='NAV ACTIVE'; bTag.className='tag green'; }
+  if(bPanel) bPanel.style.borderColor='rgba(0,230,118,.4)';
+}
+function stopNav() { setNavRunning(false); }
+
+// ── Set base station coordinates ─────────────────────────────
+function setBase() {
+  var lat = parseFloat(document.getElementById('inp-lat').value);
+  var lng = parseFloat(document.getElementById('inp-lng').value);
+  var msg = document.getElementById('base-msg');
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    msg.style.color = '#ff3d57'; msg.textContent = 'INVALID COORDINATES'; return;
+  }
+  // In demo mode just update display directly
+  document.getElementById('base-cur-lat').textContent = lat.toFixed(6);
+  document.getElementById('base-cur-lng').textContent = lng.toFixed(6);
+  document.getElementById('inp-lat').value = '';
+  document.getElementById('inp-lng').value = '';
+  msg.style.color = '#00e676';
+  msg.textContent = 'BASE SET ✓  ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '  (demo)';
+  var bTag = document.getElementById('baseSetTag');
+  var bPanel = document.getElementById('baseSetPanel');
+  if(bTag){ bTag.textContent='NAV ACTIVE'; bTag.className='tag green'; }
+  if(bPanel) bPanel.style.borderColor='rgba(0,230,118,.4)';
+}
+
+// ── Init & loop ───────────────────────────────────────────────
+drawCompass(null,null);drawTilt(0,0);drawHR(0,false);buildSatBars(0);
+setInterval(function(){render(demoData());},2000);
+render(demoData());
+</script>
+</body>
+</html>

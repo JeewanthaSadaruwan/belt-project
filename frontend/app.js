@@ -7,6 +7,71 @@ let reconnectInterval = 3000;
 let packetCount = 0;
 
 // ===========================
+// DEMO MODE
+// Activates automatically when ESP32 is not reachable.
+// Feeds animated fake data so the UI is fully visible offline.
+// Set DEMO_MODE = true to force it on always.
+// ===========================
+const DEMO_MODE = false;
+let _demoInterval = null;
+let _demoT = 0;
+
+function _demoData() {
+    _demoT += 0.05;
+    const dist = 850 + Math.sin(_demoT * 0.3) * 200;
+    const bearing = (180 + _demoT * 5) % 360;
+    const heading = (200 + Math.sin(_demoT) * 30) % 360;
+    const navStates = ['>> GO FORWARD <<', '>> TURN RIGHT', '>> TURN LEFT', '** ARRIVED **'];
+    return {
+        rssi: -58 + Math.round(Math.sin(_demoT) * 8),
+        gps: {
+            valid: true,
+            lat: 6.927079 + Math.sin(_demoT * 0.1) * 0.001,
+            lng: 79.861244 + Math.cos(_demoT * 0.1) * 0.001,
+            alt: 12.4 + Math.sin(_demoT * 0.2) * 2,
+            speed: 3.2 + Math.abs(Math.sin(_demoT * 0.4)) * 2,
+            sats: 8
+        },
+        imu: {
+            valid: true,
+            accel: {
+                x: Math.sin(_demoT * 1.1) * 0.8,
+                y: Math.cos(_demoT * 0.9) * 0.6,
+                z: 9.81 + Math.sin(_demoT * 1.3) * 0.2
+            },
+            gyro: {
+                x: Math.sin(_demoT * 2.1) * 0.05,
+                y: Math.cos(_demoT * 1.7) * 0.04,
+                z: Math.sin(_demoT * 0.8) * 0.12
+            },
+            temp: 28.5 + Math.sin(_demoT * 0.05) * 1.5
+        },
+        nav: {
+            distance: dist,
+            bearing: bearing,
+            heading: heading,
+            active_motor: dist < 15 ? 4 : Math.floor((_demoT * 0.2) % 4),
+            base_lat: 6.934200,
+            base_lng: 79.850600,
+            state: dist < 15 ? '** ARRIVED **' : navStates[Math.floor((_demoT * 0.1) % 3)]
+        }
+    };
+}
+
+function _startDemo() {
+    console.log('%c[DEMO MODE] ESP32 not reachable — showing demo data', 'color:#ffab00;font-weight:bold');
+    updateConnectionStatus(false, true);
+    if (_demoInterval) return;
+    // Feed first frame immediately, then every 2s
+    updateDashboard(_demoData());
+    _demoInterval = setInterval(() => updateDashboard(_demoData()), 2000);
+}
+
+function _stopDemo() {
+    if (_demoInterval) { clearInterval(_demoInterval); _demoInterval = null; }
+}
+
+// ===========================
 // Initialize
 // ===========================
 document.addEventListener('DOMContentLoaded', () => {
@@ -17,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ESP32_IP = savedIP;
         document.getElementById('espIP').value = savedIP;
     }
+    if (DEMO_MODE) { _startDemo(); return; }
     connectToESP();
 });
 
@@ -52,7 +118,8 @@ function connectWebSocket() {
         ws.onclose = function() {
             console.log('❌ WebSocket disconnected');
             updateConnectionStatus(false);
-            setTimeout(connectWebSocket, reconnectInterval);
+            _startDemo();
+            setTimeout(() => { _stopDemo(); connectWebSocket(); }, reconnectInterval);
         };
         
         ws.onerror = function(error) {
@@ -62,6 +129,7 @@ function connectWebSocket() {
         
         ws.onmessage = function(event) {
             try {
+                _stopDemo();
                 const data = JSON.parse(event.data);
                 console.log('📦 Data received:', data);
                 updateDashboard(data);
@@ -78,7 +146,7 @@ function connectWebSocket() {
 // ===========================
 // Update Connection Status
 // ===========================
-function updateConnectionStatus(connected) {
+function updateConnectionStatus(connected, demo = false) {
     const statusDot = document.getElementById('connectionStatus');
     const statusText = document.getElementById('connectionText');
     
@@ -86,6 +154,10 @@ function updateConnectionStatus(connected) {
         statusDot.className = 'status-dot connected';
         statusText.textContent = 'Connected';
         statusText.className = 'text-success';
+    } else if (demo) {
+        statusDot.className = 'status-dot disconnected';
+        statusText.textContent = 'Demo Mode';
+        statusText.className = 'text-warning';
     } else {
         statusDot.className = 'status-dot disconnected';
         statusText.textContent = 'Disconnected';

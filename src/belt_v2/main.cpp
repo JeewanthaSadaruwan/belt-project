@@ -78,11 +78,11 @@
 #include <math.h>
 
 // ============================================================
-//  BASE STATION COORDINATES
+//  BASE STATION COORDINATES  (updated live from HTTP response)
 // ============================================================
-// Colombo Fort Railway Station — ~25 km from Chilaw coast
-#define BASE_LAT              6.934200
-#define BASE_LNG              79.850600
+// Default: Colombo Fort Railway Station — overwritten via base station UI
+double BASE_LAT = 6.934200;
+double BASE_LNG = 79.850600;
 #define ARRIVED_RADIUS_M      15.0   // Enter ARRIVED when dist < 15m
 #define ARRIVED_EXIT_M        30.0   // Exit ARRIVED only when dist > 30m (hysteresis)
 #define MIN_SATS_FOR_NAV      5      // Need at least 5 sats for reliable position
@@ -226,6 +226,8 @@ unsigned long lastGyroUpdateMs   = 0;
 //  NAVIGATION OUTPUT
 // ============================================================
 enum NavState {
+  NAV_AWAIT_BASE,   // Waiting for base location to be set from dashboard
+  NAV_STANDBY,      // Base set, but user hasn't pressed START yet
   NAV_NO_GPS,
   NAV_INIT,
   NAV_ALIGN_FRONT,
@@ -235,8 +237,10 @@ enum NavState {
   NAV_ARRIVED
 };
 
-NavState      navState        = NAV_NO_GPS;
-NavState      prevNavState    = NAV_NO_GPS;  // detect state changes
+bool          baseLocationConfirmed = false; // true once base station confirms coords
+bool          navEnabled            = false;  // true once user presses START on dashboard
+NavState      navState        = NAV_AWAIT_BASE;
+NavState      prevNavState    = NAV_AWAIT_BASE;
 float         bearingToBase   = 0.0f;
 float         distanceToBase  = 0.0f;
 float         relativeBearing = 0.0f;
@@ -478,6 +482,20 @@ void updateComplementaryFilter() {
 void updateNavigation() {
   // Always start clean
   allMotorsOff();
+
+  // ── Gate: no navigation until base location confirmed from dashboard ──
+  if (!baseLocationConfirmed) {
+    updateComplementaryFilter();
+    navState = NAV_AWAIT_BASE;
+    return;
+  }
+
+  // ── Gate: user must press START on dashboard ─────────────────────
+  if (!navEnabled) {
+    updateComplementaryFilter();
+    navState = NAV_STANDBY;
+    return;
+  }
 
   // ── Run complementary filter even with no GPS fix ─────────
   // Mag+gyro keep heading valid indoors / stationary
@@ -721,6 +739,8 @@ void readMAX30102() {
 
 const char* navLabel(NavState s) {
   switch(s) {
+    case NAV_AWAIT_BASE:  return "SET BASE STATION";
+    case NAV_STANDBY:     return "STANDBY         ";
     case NAV_NO_GPS:      return "NO GPS FIX      ";
     case NAV_INIT:        return "WALK TO INIT    ";
     case NAV_ALIGN_FRONT: return ">> GO FORWARD <<";
@@ -840,6 +860,9 @@ void sendSensorData() {
   navObj["rel_bearing"]   = relativeBearing;
   navObj["distance"]      = distanceToBase;
   navObj["state"]         = navLabel(navState);
+  navObj["base_set"]      = baseLocationConfirmed;
+  navObj["nav_running"]   = navEnabled;
+  navObj["nav_running"]   = navEnabled;
 
   JsonObject hrObj = doc.createNestedObject("hr");
   hrObj["bpm"]       = sensorData.heartRate;
@@ -860,6 +883,43 @@ void sendSensorData() {
     if (code == 200) {
       Serial.print("  ok");
       digitalWrite(STATUS_LED, HIGH); delay(60); digitalWrite(STATUS_LED, LOW);
+
+      // ── Parse response: base station may have sent updated coordinates ──
+      String resp = http.getString();
+      StaticJsonDocument<1200> respDoc;
+      if (!deserializeJson(respDoc, resp)) {
+        if (respDoc.containsKey("base_lat") && respDoc.containsKey("base_lng")) {
+          double newLat = respDoc["base_lat"];
+          double newLng = respDoc["base_lng"];
+          if (newLat >= -90.0 && newLat <= 90.0 && newLng >= -180.0 && newLng <= 180.0) {
+            if (fabs(newLat - BASE_LAT) > 0.000001 || fabs(newLng - BASE_LNG) > 0.000001) {
+              BASE_LAT = newLat;
+              BASE_LNG = newLng;
+              Serial.printf("\n HTTP | Base updated: %.6f, %.6f\n", BASE_LAT, BASE_LNG);
+            }
+          }
+        }
+        // Activate navigation once base station confirms location is set
+        if (!baseLocationConfirmed && respDoc.containsKey("base_confirmed")
+            && (bool)respDoc["base_confirmed"]) {
+          baseLocationConfirmed = true;
+          Serial.println(" HTTP | Base location CONFIRMED — navigation ACTIVE");
+        }
+        // Enable/disable navigation from dashboard START/STOP button
+        if (respDoc.containsKey("nav_enabled")) {
+          bool wasEnabled = navEnabled;
+          navEnabled = (bool)respDoc["nav_enabled"];
+          if (navEnabled != wasEnabled)
+            Serial.printf(" HTTP | Navigation %s by dashboard\n", navEnabled ? "STARTED" : "STOPPED");
+        }
+        // Enable/disable navigation from dashboard START/STOP button
+        if (respDoc.containsKey("nav_enabled")) {
+          bool wasEnabled = navEnabled;
+          navEnabled = (bool)respDoc["nav_enabled"];
+          if (navEnabled != wasEnabled)
+            Serial.printf(" HTTP | Navigation %s by dashboard\n", navEnabled ? "STARTED" : "STOPPED");
+        }
+      }
     }
     Serial.println();
   } else {
