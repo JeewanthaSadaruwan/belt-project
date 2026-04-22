@@ -64,8 +64,6 @@
  */
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <TinyGPSPlus.h>
 #include <HardwareSerial.h>
@@ -88,11 +86,11 @@ double BASE_LNG = 79.850600;
 #define MIN_SATS_FOR_NAV      5      // Need at least 5 sats for reliable position
 
 // ============================================================
-//  WIFI
+//  NODE UART (belt → node_member ESP32)
 // ============================================================
-#define WIFI_SSID             "BeltStation"
-#define WIFI_PASSWORD         "belt12345"
-#define BASE_URL              "http://192.168.4.1/api/data"
+// Belt TX → Node RX:  Belt GPIO4 ──► Node GPIO16
+// Shared GND required
+#define NODE_UART_TX          4      // Serial1 TX → node_member GPIO16
 
 // ============================================================
 //  PINS
@@ -115,7 +113,6 @@ double BASE_LNG = 79.850600;
 // ============================================================
 #define SEND_INTERVAL_MS      2000
 #define NAV_UPDATE_MS         100    // 10 Hz nav loop
-#define WIFI_RETRY_MS         5000
 
 // Vibration pulse timings (ms)
 #define PULSE_FORWARD_ON      250    // FRONT pulse: on time
@@ -155,7 +152,7 @@ double BASE_LNG = 79.850600;
 TinyGPSPlus         gps;
 HardwareSerial      gpsSerial(2);
 Adafruit_MPU6050    mpu;
-Adafruit_HMC5883_U  mag(12345);  // HMC5983 — same I2C bus (SDA=21, SCL=22) addr 0x1E
+Adafruit_HMC5883_Unified  mag(12345);  // HMC5983 — same I2C bus (SDA=21, SCL=22) addr 0x1E
 MAX30105            particleSensor;
 
 // Heart rate beat detection state
@@ -255,7 +252,6 @@ bool          pulseArrivedOn    = false;
 // Timers
 unsigned long lastSend        = 0;
 unsigned long lastNav         = 0;
-unsigned long lastWifiAttempt = 0;
 int           packetsSent     = 0;
 
 const int MOTORS[4] = {MOTOR_FRONT, MOTOR_RIGHT, MOTOR_BACK, MOTOR_LEFT};
@@ -561,22 +557,12 @@ void updateNavigation() {
 }
 
 // ============================================================
-//  WIFI
+//  NODE UART INIT
 // ============================================================
-void connectWiFi() {
-  Serial.println("\n[WiFi] Connecting...");
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
-    delay(200); Serial.print(".");
-  }
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED)
-    Serial.printf("[WiFi] Connected  IP: %s\n", WiFi.localIP().toString().c_str());
-  else
-    Serial.println("[WiFi] Failed (will retry)");
+void initNodeUART() {
+  // Serial1: TX only (one-way), GPIO4 → node_member GPIO16
+  Serial1.begin(115200, SERIAL_8N1, -1, NODE_UART_TX);
+  Serial.println("[UART] Serial1 TX ready on GPIO4 → node_member GPIO16");
 }
 
 // ============================================================
@@ -752,6 +738,22 @@ const char* navLabel(NavState s) {
   }
 }
 
+// Space-free nav code for JSON/mesh transmission
+const char* navCode(NavState s) {
+  switch(s) {
+    case NAV_AWAIT_BASE:  return "SET_BASE";
+    case NAV_STANDBY:     return "STANDBY";
+    case NAV_NO_GPS:      return "NO_GPS";
+    case NAV_INIT:        return "INIT";
+    case NAV_ALIGN_FRONT: return "FORWARD";
+    case NAV_TURN_RIGHT:  return "TURN_RIGHT";
+    case NAV_TURN_BACK:   return "TURN_BACK";
+    case NAV_TURN_LEFT:   return "TURN_LEFT";
+    case NAV_ARRIVED:     return "ARRIVED";
+    default:              return "UNKNOWN";
+  }
+}
+
 const char* headingLabel(HeadingSource s) {
   switch(s) {
     case HEADING_NONE:  return "BOOT ";
@@ -826,107 +828,35 @@ void sendSensorData() {
 
   Serial.println("------------------------------------------------------------");
 
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println(" HTTP | Not connected -- skipping");
-    Serial.println("============================================================");
-    return;
-  }
+  // ── Send compact JSON to node_member ESP32 over UART ─────────
+  StaticJsonDocument<400> doc;
+  doc["lat"]  = sensorData.latitude;
+  doc["lon"]  = sensorData.longitude;
+  doc["alt"]  = sensorData.altitude;
+  doc["spd"]  = sensorData.speed;
+  doc["hdg"]  = fusedHeading;
+  doc["dist"] = distanceToBase;
+  doc["rel"]  = relativeBearing;
+  doc["temp"] = sensorData.temperature;
+  doc["sats"] = sensorData.satellites;
+  doc["gps"]  = sensorData.gpsValid ? 1 : 0;
+  doc["hr"]   = sensorData.heartRate;
+  doc["nav"]  = navCode(navState);
+  doc["ax"]   = sensorData.accelX;
+  doc["ay"]   = sensorData.accelY;
+  doc["az"]   = sensorData.accelZ;
+  doc["gx"]   = sensorData.gyroX;
+  doc["gy"]   = sensorData.gyroY;
+  doc["gz"]   = sensorData.gyroZ;
 
-  StaticJsonDocument<900> doc;
+  String line;
+  serializeJson(doc, line);
+  line += '\n';
+  Serial1.print(line);
 
-  JsonObject gpsObj = doc.createNestedObject("gps");
-  gpsObj["lat"]        = sensorData.latitude;
-  gpsObj["lng"]        = sensorData.longitude;
-  gpsObj["alt"]        = sensorData.altitude;
-  gpsObj["speed"]      = sensorData.speed;
-  gpsObj["course"]     = sensorData.courseValid ? sensorData.gpsCourse : -1.0f;
-  gpsObj["satellites"] = sensorData.satellites;
-  gpsObj["valid"]      = sensorData.gpsValid;
-
-  JsonObject imuObj = doc.createNestedObject("imu");
-  imuObj["accel_x"] = sensorData.accelX;
-  imuObj["accel_y"] = sensorData.accelY;
-  imuObj["accel_z"] = sensorData.accelZ;
-  imuObj["gyro_x"]  = sensorData.gyroX;
-  imuObj["gyro_y"]  = sensorData.gyroY;
-  imuObj["gyro_z"]  = sensorData.gyroZ;
-  imuObj["temp"]    = sensorData.temperature;
-  imuObj["valid"]   = sensorData.imuValid;
-
-  JsonObject navObj = doc.createNestedObject("nav");
-  navObj["fused_heading"] = fusedHeading;
-  navObj["heading_src"]   = headingLabel(headingSource);
-  navObj["bearing"]       = bearingToBase;
-  navObj["rel_bearing"]   = relativeBearing;
-  navObj["distance"]      = distanceToBase;
-  navObj["state"]         = navLabel(navState);
-  navObj["base_set"]      = baseLocationConfirmed;
-  navObj["nav_running"]   = navEnabled;
-  navObj["nav_running"]   = navEnabled;
-
-  JsonObject hrObj = doc.createNestedObject("hr");
-  hrObj["bpm"]       = sensorData.heartRate;
-  hrObj["ir"]        = sensorData.irValue;
-  hrObj["finger"]    = sensorData.fingerOn;
-  hrObj["valid"]     = sensorData.maxValid;
-
-  String payload;
-  serializeJson(doc, payload);
-
-  HTTPClient http;
-  http.begin(BASE_URL);
-  http.addHeader("Content-Type", "application/json");
-
-  int code = http.POST(payload);
-  if (code > 0) {
-    Serial.printf(" HTTP | %d", code);
-    if (code == 200) {
-      Serial.print("  ok");
-      digitalWrite(STATUS_LED, HIGH); delay(60); digitalWrite(STATUS_LED, LOW);
-
-      // ── Parse response: base station may have sent updated coordinates ──
-      String resp = http.getString();
-      StaticJsonDocument<1200> respDoc;
-      if (!deserializeJson(respDoc, resp)) {
-        if (respDoc.containsKey("base_lat") && respDoc.containsKey("base_lng")) {
-          double newLat = respDoc["base_lat"];
-          double newLng = respDoc["base_lng"];
-          if (newLat >= -90.0 && newLat <= 90.0 && newLng >= -180.0 && newLng <= 180.0) {
-            if (fabs(newLat - BASE_LAT) > 0.000001 || fabs(newLng - BASE_LNG) > 0.000001) {
-              BASE_LAT = newLat;
-              BASE_LNG = newLng;
-              Serial.printf("\n HTTP | Base updated: %.6f, %.6f\n", BASE_LAT, BASE_LNG);
-            }
-          }
-        }
-        // Activate navigation once base station confirms location is set
-        if (!baseLocationConfirmed && respDoc.containsKey("base_confirmed")
-            && (bool)respDoc["base_confirmed"]) {
-          baseLocationConfirmed = true;
-          Serial.println(" HTTP | Base location CONFIRMED — navigation ACTIVE");
-        }
-        // Enable/disable navigation from dashboard START/STOP button
-        if (respDoc.containsKey("nav_enabled")) {
-          bool wasEnabled = navEnabled;
-          navEnabled = (bool)respDoc["nav_enabled"];
-          if (navEnabled != wasEnabled)
-            Serial.printf(" HTTP | Navigation %s by dashboard\n", navEnabled ? "STARTED" : "STOPPED");
-        }
-        // Enable/disable navigation from dashboard START/STOP button
-        if (respDoc.containsKey("nav_enabled")) {
-          bool wasEnabled = navEnabled;
-          navEnabled = (bool)respDoc["nav_enabled"];
-          if (navEnabled != wasEnabled)
-            Serial.printf(" HTTP | Navigation %s by dashboard\n", navEnabled ? "STARTED" : "STOPPED");
-        }
-      }
-    }
-    Serial.println();
-  } else {
-    Serial.printf(" HTTP | FAILED: %s\n", http.errorToString(code).c_str());
-  }
-  http.end();
+  Serial.println(" UART | → node: " + line);
   Serial.println("============================================================");
+  digitalWrite(STATUS_LED, HIGH); delay(30); digitalWrite(STATUS_LED, LOW);
 }
 
 // ============================================================
@@ -969,7 +899,7 @@ void setup() {
     digitalWrite(MOTORS[i], LOW);
   }
 
-  connectWiFi();
+  initNodeUART();
   initGPS();
   initIMU();       // includes gyro bias calibration -- keep still!
   initMag();       // HMC5983: seeds initial heading from compass
@@ -1001,13 +931,7 @@ void loop() {
     lastNav = millis();
   }
 
-  // WiFi watchdog
-  if (WiFi.status() != WL_CONNECTED && millis() - lastWifiAttempt > WIFI_RETRY_MS) {
-    lastWifiAttempt = millis();
-    connectWiFi();
-  }
-
-  // Telemetry
+  // UART telemetry
   if (millis() - lastSend >= SEND_INTERVAL_MS) {
     sendSensorData();
     lastSend = millis();

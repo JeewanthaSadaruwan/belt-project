@@ -54,7 +54,7 @@
 #define USE_ESP_NOW_ONLY true
 
 // ── Mesh config ───────────────────────────────────────────────
-#define MESH_PREFIX   "ESP_MESH"
+#define MESH_PREFIX   "BELT_BASE_9271_X9"
 #define MESH_PASSWORD "12345678"
 #define MESH_PORT     5555
 
@@ -93,12 +93,22 @@ bool   meshReady = false;
 struct BeltData {
   double lat     = 0.0;
   double lon     = 0.0;
+  float  alt     = 0.0f;
+  float  spd     = 0.0f;
   float  heading = 0.0f;
   float  dist    = 0.0f;
   float  rel     = 0.0f;
   float  temp    = 0.0f;
+  float  hr      = 0.0f;
+  float  ax      = 0.0f;
+  float  ay      = 0.0f;
+  float  az      = 0.0f;
+  float  gx      = 0.0f;
+  float  gy      = 0.0f;
+  float  gz      = 0.0f;
   int    sats    = 0;
   bool   gpsOk   = false;
+  String nav     = "";
   bool   fresh   = false;
 } beltData;
 
@@ -167,16 +177,26 @@ void readBeltUART() {
   while (Serial2.available()) {
     char c = Serial2.read();
     if (c == '\n') {
-      StaticJsonDocument<256> doc;
+      StaticJsonDocument<512> doc;
       if (deserializeJson(doc, buf) == DeserializationError::Ok) {
-        beltData.lat     = doc["lat"]     | 0.0;
-        beltData.lon     = doc["lon"]     | 0.0;
-        beltData.heading = doc["heading"] | 0.0f;
-        beltData.dist    = doc["dist"]    | 0.0f;
-        beltData.rel     = doc["rel"]     | 0.0f;
-        beltData.temp    = doc["temp"]    | 0.0f;
-        beltData.sats    = doc["sats"]    | 0;
-        beltData.gpsOk   = (doc["gps"]   | 0) == 1;
+        beltData.lat     = doc["lat"]  | 0.0;
+        beltData.lon     = doc["lon"]  | 0.0;
+        beltData.alt     = doc["alt"]  | 0.0f;
+        beltData.spd     = doc["spd"]  | 0.0f;
+        beltData.heading = doc["hdg"]  | 0.0f;
+        beltData.dist    = doc["dist"] | 0.0f;
+        beltData.rel     = doc["rel"]  | 0.0f;
+        beltData.temp    = doc["temp"] | 0.0f;
+        beltData.hr      = doc["hr"]   | 0.0f;
+        beltData.ax      = doc["ax"]   | 0.0f;
+        beltData.ay      = doc["ay"]   | 0.0f;
+        beltData.az      = doc["az"]   | 0.0f;
+        beltData.gx      = doc["gx"]   | 0.0f;
+        beltData.gy      = doc["gy"]   | 0.0f;
+        beltData.gz      = doc["gz"]   | 0.0f;
+        beltData.sats    = doc["sats"] | 0;
+        beltData.gpsOk   = (doc["gps"] | 0) == 1;
+        beltData.nav     = doc["nav"]  | "";
         beltData.fresh   = true;
         Serial.println("[BELT] RX: " + buf);
       } else {
@@ -213,15 +233,24 @@ void sendMessage() {
   // ── 1. Always send over painlessMesh (ESP-NOW) ─────────────
   String meshMsg = nodeName +
     " Parent:"  + String(parentId) +
-    " Temp:"    + String(beltData.temp, 1) +
-    " CO:0 CO2:0 Fire:0 Heart:0" +
+    " Nav:"     + beltData.nav +
+    " Dist:"    + String(beltData.dist, 1) +
+    " Hdg:"     + String(beltData.heading, 1) +
+    " Rel:"     + String(beltData.rel, 1) +
     " Lat:"     + String(beltData.lat, 6) +
     " Lon:"     + String(beltData.lon, 6) +
-    " Heading:" + String(beltData.heading, 1) +
-    " Dist:"    + String(beltData.dist, 1) +
+    " Alt:"     + String(beltData.alt, 1) +
+    " Spd:"     + String(beltData.spd, 1) +
+    " Temp:"    + String(beltData.temp, 1) +
+    " HR:"      + String(beltData.hr, 1) +
+    " Ax:"      + String(beltData.ax, 2) +
+    " Ay:"      + String(beltData.ay, 2) +
+    " Az:"      + String(beltData.az, 2) +
+    " Gx:"      + String(beltData.gx, 3) +
+    " Gy:"      + String(beltData.gy, 3) +
+    " Gz:"      + String(beltData.gz, 3) +
     " Sats:"    + String(beltData.sats) +
     " GPS:"     + String(beltData.gpsOk ? 1 : 0) +
-    " Image:0"  +
     " Panic:"   + String(panic) +
     " RSSI:"    + String(rssi);
 
@@ -284,7 +313,8 @@ void setup() {
 #endif
 
   // Mesh
-  mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
+  // Keep node in STA mode so only base station exposes the AP used for dashboard access.
+  mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT, WIFI_STA);
   mesh.onNewConnection(&newConnectionCallback);
 
   userScheduler.addTask(taskSend);
