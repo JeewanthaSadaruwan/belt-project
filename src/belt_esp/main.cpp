@@ -81,7 +81,7 @@
 // Default: Colombo Fort Railway Station — overwritten via base station UI
 double BASE_LAT = 6.934200;
 double BASE_LNG = 79.850600;
-#define ARRIVED_RADIUS_M      15.0   // Enter ARRIVED when dist < 15m
+#define ARRIVED_RADIUS_M      5.0    // Enter ARRIVED when dist < 5m
 #define ARRIVED_EXIT_M        30.0   // Exit ARRIVED only when dist > 30m (hysteresis)
 #define MIN_SATS_FOR_NAV      5      // Need at least 5 sats for reliable position
 
@@ -107,6 +107,7 @@ double BASE_LNG = 79.850600;
 #define MOTOR_RIGHT           26
 #define MOTOR_BACK            27
 #define MOTOR_LEFT            14
+#define NAV_BUTTON            23   // GPIO23 — active HIGH, external pull-down
 
 // ============================================================
 //  TIMING
@@ -145,6 +146,13 @@ double BASE_LNG = 79.850600;
 // Navigation zones
 #define FRONT_ZONE_DEG        45.0f
 #define SIDE_ZONE_DEG         135.0f
+
+// ── Auto Base Station Capture at boot ─────────────────────────
+#define BASE_CAPTURE_SECS     10   // Average GPS position for this many seconds
+#define BASE_CAPTURE_MIN_SATS 5    // Minimum satellites required to begin capture
+
+// ── Navigation Button ─────────────────────────────────────────
+#define NAV_BTN_HOLD_MS       3000  // Hold this long to start navigation
 
 // ============================================================
 //  OBJECTS
@@ -253,6 +261,23 @@ bool          pulseArrivedOn    = false;
 unsigned long lastSend        = 0;
 unsigned long lastNav         = 0;
 int           packetsSent     = 0;
+
+// ============================================================
+//  AUTO BASE STATION CAPTURE STATE
+// ============================================================
+bool          baseCapturing        = false;
+unsigned long baseCaptureStart     = 0;
+double        baseSumLat           = 0.0;
+double        baseSumLon           = 0.0;
+int           baseSampleCount      = 0;
+unsigned long lastBaseProgressMs   = 0;
+
+// ============================================================
+//  NAVIGATION BUTTON STATE  (GPIO23)
+// ============================================================
+unsigned long buttonPressedAt  = 0;
+bool          buttonHeld       = false;
+int           lastBtnCountdown = -1;
 
 const int MOTORS[4] = {MOTOR_FRONT, MOTOR_RIGHT, MOTOR_BACK, MOTOR_LEFT};
 
@@ -451,6 +476,150 @@ void updateComplementaryFilter() {
       headingSource = (millis() - lastGpsLockMs > GYRO_STALE_MS)
                       ? HEADING_STALE
                       : HEADING_GYRO;
+    }
+  }
+}
+
+// ============================================================
+//  AUTO BASE STATION CAPTURE
+//  Called every loop cycle. Averages GPS position for
+//  BASE_CAPTURE_SECS seconds once a good fix is available.
+//  Sets BASE_LAT/BASE_LNG and baseLocationConfirmed when done.
+// ============================================================
+void tryAutoBaseCapture() {
+  if (baseLocationConfirmed) return;
+  if (!sensorData.gpsValid)  return;
+  if (sensorData.satellites < BASE_CAPTURE_MIN_SATS) return;
+
+  if (!baseCapturing) {
+    baseCapturing    = true;
+    baseCaptureStart = millis();
+    baseSumLat       = 0.0;
+    baseSumLon       = 0.0;
+    baseSampleCount  = 0;
+    Serial.println();
+    Serial.println("============================================================");
+    Serial.println("  [BASE] GPS fix acquired — capturing base station position");
+    Serial.printf ("          Sats: %d   Lat: %.6f   Lon: %.6f\n",
+      sensorData.satellites, sensorData.latitude, sensorData.longitude);
+    Serial.printf ("          Averaging for %d seconds...\n", BASE_CAPTURE_SECS);
+    Serial.println("============================================================");
+  }
+
+  baseSumLat     += sensorData.latitude;
+  baseSumLon     += sensorData.longitude;
+  baseSampleCount++;
+
+  unsigned long elapsed = millis() - baseCaptureStart;
+
+  // Progress print every 2 s
+  if (millis() - lastBaseProgressMs >= 2000) {
+    lastBaseProgressMs = millis();
+    int remaining = (int)((BASE_CAPTURE_SECS * 1000UL - elapsed) / 1000UL);
+    if (remaining > 0) {
+      Serial.printf("[BASE] Capturing... %ds left  samples:%d  avg:(%.6f, %.6f)  sats:%d\n",
+        remaining, baseSampleCount,
+        baseSumLat / baseSampleCount, baseSumLon / baseSampleCount,
+        sensorData.satellites);
+    }
+  }
+
+  if (elapsed >= (unsigned long)(BASE_CAPTURE_SECS * 1000)) {
+    BASE_LAT = baseSumLat / baseSampleCount;
+    BASE_LNG = baseSumLon / baseSampleCount;
+    baseLocationConfirmed = true;
+
+    Serial.println();
+    Serial.println("  ************************************************************");
+    Serial.println("  *                                                          *");
+    Serial.println("  *          BASE STATION POSITION LOCKED                   *");
+    Serial.println("  *                                                          *");
+    Serial.printf ("  *   Lat : %-10.6f                                   *\n", BASE_LAT);
+    Serial.printf ("  *   Lon : %-10.6f                                   *\n", BASE_LNG);
+    Serial.printf ("  *   From: %d samples over %d seconds               *\n",
+      baseSampleCount, BASE_CAPTURE_SECS);
+    Serial.printf ("  *   Sats: %d                                           *\n",
+      sensorData.satellites);
+    Serial.println("  *                                                          *");
+    Serial.println("  *   HOLD NAV BUTTON (GPIO23) FOR 3 SECONDS TO START       *");
+    Serial.println("  *   RETURN-TO-BASE NAVIGATION                             *");
+    Serial.println("  *                                                          *");
+    Serial.println("  ************************************************************");
+    Serial.println();
+  }
+}
+
+// ============================================================
+//  NAVIGATION BUTTON  (GPIO23, active HIGH, external pull-down)
+//  Hold 3 seconds to activate return-to-base navigation.
+//  Prints countdown feedback. Never disables once activated.
+// ============================================================
+void checkNavButton() {
+  if (navEnabled) return;   // already running, nothing to do
+
+  int state = digitalRead(NAV_BUTTON);
+
+  if (state == HIGH) {
+    if (!buttonHeld) {
+      buttonHeld      = true;
+      buttonPressedAt = millis();
+      lastBtnCountdown = -1;
+      if (!baseLocationConfirmed) {
+        Serial.println("[BTN] Base station not locked yet — wait for GPS capture first!");
+        return;
+      }
+      Serial.println();
+      Serial.println("[BTN] Button held — keep holding 3 s to start navigation...");
+    }
+
+    if (!baseLocationConfirmed) return;
+
+    int elapsed  = (int)((millis() - buttonPressedAt) / 1000);
+    int countdown = 3 - elapsed;
+
+    if (countdown != lastBtnCountdown && countdown > 0) {
+      lastBtnCountdown = countdown;
+      Serial.printf("[BTN] Starting in %d...\n", countdown);
+    }
+
+    if (millis() - buttonPressedAt >= NAV_BTN_HOLD_MS) {
+      navEnabled   = true;
+      buttonHeld   = false;
+
+      float dist = (sensorData.gpsValid)
+        ? calcDistance(sensorData.latitude, sensorData.longitude, BASE_LAT, BASE_LNG)
+        : 0.0f;
+
+      Serial.println();
+      Serial.println("  ############################################################");
+      Serial.println("  #                                                          #");
+      Serial.println("  #        NAVIGATION ACTIVATED — RETURN TO BASE            #");
+      Serial.println("  #                                                          #");
+      Serial.printf ("  #   Base  Lat : %-10.6f                              #\n", BASE_LAT);
+      Serial.printf ("  #   Base  Lon : %-10.6f                              #\n", BASE_LNG);
+      if (sensorData.gpsValid) {
+        Serial.printf ("  #   Current   : %.6f, %.6f              #\n",
+          sensorData.latitude, sensorData.longitude);
+        Serial.printf ("  #   Distance  : %.1f m                                  #\n", dist);
+      } else {
+        Serial.println("  #   GPS       : No fix yet — heading will use compass       #");
+      }
+      Serial.println("  #                                                          #");
+      Serial.println("  #   Vibration motors will guide you back.                  #");
+      Serial.println("  #   ARRIVED when within 5 m of base.                      #");
+      Serial.println("  #                                                          #");
+      Serial.println("  ############################################################");
+      Serial.println();
+    }
+
+  } else {
+    if (buttonHeld) {
+      int heldMs = (int)(millis() - buttonPressedAt);
+      if (heldMs < NAV_BTN_HOLD_MS) {
+        Serial.printf("[BTN] Released after %d ms — need 3000 ms to activate\n", heldMs);
+      }
+      buttonHeld = false;
+      lastBtnCountdown = -1;
     }
   }
 }
@@ -725,8 +894,8 @@ void readMAX30102() {
 
 const char* navLabel(NavState s) {
   switch(s) {
-    case NAV_AWAIT_BASE:  return "SET BASE STATION";
-    case NAV_STANDBY:     return "STANDBY         ";
+    case NAV_AWAIT_BASE:  return "CAPTURING BASE  ";
+    case NAV_STANDBY:     return "HOLD BTN TO NAV ";
     case NAV_NO_GPS:      return "NO GPS FIX      ";
     case NAV_INIT:        return "WALK TO INIT    ";
     case NAV_ALIGN_FRONT: return ">> GO FORWARD <<";
@@ -792,6 +961,23 @@ void sendSensorData() {
     headingLabel(headingSource),
     fusedHeading, bearingToBase, relativeBearing, distanceToBase);
 
+  // Navigation direction cue
+  if (navEnabled) {
+    switch (navState) {
+      case NAV_ALIGN_FRONT: Serial.printf(" NAV  | ► GO FORWARD    (rel: %+.1f°  dist: %.1fm)\n", relativeBearing, distanceToBase); break;
+      case NAV_TURN_RIGHT:  Serial.printf(" NAV  | ► TURN RIGHT    (rel: %+.1f°  dist: %.1fm)\n", relativeBearing, distanceToBase); break;
+      case NAV_TURN_LEFT:   Serial.printf(" NAV  | ► TURN LEFT     (rel: %+.1f°  dist: %.1fm)\n", relativeBearing, distanceToBase); break;
+      case NAV_TURN_BACK:   Serial.printf(" NAV  | ► TURN AROUND   (rel: %+.1f°  dist: %.1fm)\n", relativeBearing, distanceToBase); break;
+      case NAV_ARRIVED:     Serial.printf(" NAV  | ✓ ARRIVED       (dist: %.1fm — within %.0fm radius)\n", distanceToBase, (float)ARRIVED_RADIUS_M); break;
+      case NAV_NO_GPS:      Serial.println(" NAV  | ⚠ NO GPS FIX — rotate slowly to find heading"); break;
+      default: break;
+    }
+  }
+
+  Serial.printf(" BASE | %.6f, %.6f  %s\n",
+    BASE_LAT, BASE_LNG,
+    baseLocationConfirmed ? "[LOCKED]" : "[CAPTURING...]");
+
   if (headingSource == HEADING_STALE) {
     Serial.printf("      | !! STALE: no GPS lock for %lu s -- gyro drift likely\n",
       (millis() - lastGpsLockMs) / 1000UL);
@@ -829,7 +1015,7 @@ void sendSensorData() {
   Serial.println("------------------------------------------------------------");
 
   // ── Send compact JSON to node_member ESP32 over UART ─────────
-  StaticJsonDocument<400> doc;
+  StaticJsonDocument<512> doc;
   doc["lat"]  = sensorData.latitude;
   doc["lon"]  = sensorData.longitude;
   doc["alt"]  = sensorData.altitude;
@@ -841,13 +1027,17 @@ void sendSensorData() {
   doc["sats"] = sensorData.satellites;
   doc["gps"]  = sensorData.gpsValid ? 1 : 0;
   doc["hr"]   = sensorData.heartRate;
-  doc["nav"]  = navCode(navState);
-  doc["ax"]   = sensorData.accelX;
-  doc["ay"]   = sensorData.accelY;
-  doc["az"]   = sensorData.accelZ;
-  doc["gx"]   = sensorData.gyroX;
-  doc["gy"]   = sensorData.gyroY;
-  doc["gz"]   = sensorData.gyroZ;
+  doc["nav"]      = navCode(navState);
+  doc["ax"]       = sensorData.accelX;
+  doc["ay"]       = sensorData.accelY;
+  doc["az"]       = sensorData.accelZ;
+  doc["gx"]       = sensorData.gyroX;
+  doc["gy"]       = sensorData.gyroY;
+  doc["gz"]       = sensorData.gyroZ;
+  doc["base_lat"] = BASE_LAT;
+  doc["base_lng"] = BASE_LNG;
+  doc["base_ok"]  = baseLocationConfirmed ? 1 : 0;
+  doc["nav_on"]   = navEnabled ? 1 : 0;
 
   String line;
   serializeJson(doc, line);
@@ -882,17 +1072,21 @@ void setup() {
   delay(2000);
 
   Serial.println("\n============================================================");
-  Serial.println("  NAVIGATION BELT v3.2");
+  Serial.println("  NAVIGATION BELT v3.3");
   Serial.println("  GPS + HMC5983 Mag + Gyro Complementary Filter + Heart Rate");
   Serial.println("============================================================");
-  Serial.printf("  Base station:  Colombo Fort Railway Station\n");
-  Serial.printf("                 %.6f, %.6f\n", BASE_LAT, BASE_LNG);
-  Serial.printf("  Arrived at:    %.1f m\n", ARRIVED_RADIUS_M);
-  Serial.printf("  Gyro stale:    after %d s without GPS lock\n", GYRO_STALE_MS/1000);
+  Serial.printf ("  Arrived at:    %.1f m from base\n", ARRIVED_RADIUS_M);
+  Serial.printf ("  Gyro stale:    after %d s without GPS lock\n", GYRO_STALE_MS/1000);
+  Serial.println("  Base station:  Auto-captured from GPS at boot");
+  Serial.printf ("                 (needs %d sats, averages for %d s)\n",
+    BASE_CAPTURE_MIN_SATS, BASE_CAPTURE_SECS);
+  Serial.println("  Nav button:    GPIO23 — hold 3 s to start return-to-base");
   Serial.println("============================================================\n");
 
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LOW);
+
+  pinMode(NAV_BUTTON, INPUT);   // external pull-down; HIGH = pressed
 
   for (int i = 0; i < 4; i++) {
     pinMode(MOTORS[i], OUTPUT);
@@ -909,7 +1103,8 @@ void setup() {
 
   Serial.println("\n[READY] Compass heading active from boot.");
   Serial.println("        Complementary filter: HMC5983 mag + gyro fused.");
-  Serial.println("        GPS COG snaps to true North when walking.\n");
+  Serial.println("        GPS COG snaps to true North when walking.");
+  Serial.println("        Waiting for GPS fix to capture base station...\n");
 }
 
 // ============================================================
@@ -924,6 +1119,12 @@ void loop() {
 
   // Read pulse oximeter
   readMAX30102();
+
+  // Auto-capture base station from GPS at boot
+  tryAutoBaseCapture();
+
+  // Check navigation button (GPIO23, hold 3s)
+  checkNavButton();
 
   // Navigation + heading fusion at 10 Hz
   if (millis() - lastNav >= NAV_UPDATE_MS) {

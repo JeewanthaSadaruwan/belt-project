@@ -45,7 +45,7 @@
 #include <ArduinoJson.h>
 
 // ── Transport decision ────────────────────────────────────────
-#define USE_ESP_NOW_ONLY true
+#define USE_ESP_NOW_ONLY false   // kept for legacy reference; LoRa RX is always active
 
 // ── Mesh config ───────────────────────────────────────────────
 #define MESH_PREFIX   "BELT_BASE_9271_X9"
@@ -124,29 +124,37 @@ bool initLoRaRX() {
   LoRa.setCodingRate4(5);
   LoRa.setSyncWord(0x12);
   LoRa.enableCrc();
-  LoRa.onReceive(onLoRaReceive);
-  LoRa.receive();
-  Serial.printf("[LoRa] Frequency: %.0f Hz — RX_CONTINUOUS active\n", (float)LORA_FREQUENCY);
+  // No ISR — use polling via LoRa.parsePacket() to avoid
+  // SPI contention with painlessMesh FreeRTOS tasks.
+  Serial.printf("[LoRa] Frequency: %.0f Hz — polling mode\n", (float)LORA_FREQUENCY);
   Serial.println("[LoRa] Init success!");
   return true;
 }
 
+static void updateLatestApiDataFromLoRa(const char* payload, int loraRssi); // forward decl
+
 void processLoRaPackets() {
-  while (loraRingTail != loraRingHead) {
-    volatile LoRaRxEntry* entry = &loraRing[loraRingTail];
-    loraRingTail = (loraRingTail + 1) % LORA_RING_SIZE;
-    if (!entry->valid) continue;
-    blinkLED(2, 80, 80);
-    Serial.println("\n════════════════════════════════════════");
-    Serial.printf ("  [LoRa RX] PACKET #%04u\n", entry->pktCounter);
-    Serial.println("────────────────────────────────────────");
-    Serial.printf ("  Type   : 0x%02X\n",  entry->pktType);
-    Serial.printf ("  RSSI   : %d dBm\n",  entry->rssi);
-    Serial.printf ("  Length : %d bytes\n",(int)strlen((char*)entry->data));
-    Serial.printf ("  Data   : %s\n",      (char*)entry->data);
-    Serial.println("════════════════════════════════════════\n");
-    entry->valid = false;
-  }
+  int packetSize = LoRa.parsePacket();
+  if (packetSize < 4) return;
+
+  int      rssi       = LoRa.packetRssi();
+  uint8_t  pktType    = LoRa.read();
+  uint16_t pktCounter = ((uint16_t)LoRa.read() << 8) | LoRa.read();
+  uint8_t  dataLen    = LoRa.read();
+  if (dataLen > LORA_MAX_DATA - 1) dataLen = LORA_MAX_DATA - 1;
+
+  char data[LORA_MAX_DATA];
+  int idx = 0;
+  while (LoRa.available() && idx < dataLen)
+    data[idx++] = (char)LoRa.read();
+  data[idx] = '\0';
+
+  blinkLED(2, 80, 80);
+  Serial.println("\n════════════════════════════════════════");
+  Serial.printf ("  [LoRa RX] PKT #%04u  RSSI: %d dBm\n", pktCounter, rssi);
+  Serial.printf ("  Data: %s\n", data);
+  Serial.println("════════════════════════════════════════\n");
+  updateLatestApiDataFromLoRa(data, rssi);
 }
 
 
@@ -208,6 +216,25 @@ void droppedConnectionCallback(uint32_t nodeId) {
   Serial.printf("[MESH] Total Clients: %d\n", nodeCount);
 }
 
+// ── Helper parsers ────────────────────────────────────────────
+static String extractField(const String& data, const char* key) {
+  int start = data.indexOf(key);
+  if (start < 0) return "-";
+  start += strlen(key);
+  int end = data.indexOf(" ", start);
+  if (end < 0) end = data.length();
+  return data.substring(start, end);
+}
+static float fieldToFloat(const String& data, const char* key, float def = 0.0f) {
+  String v = extractField(data, key);
+  if (v == "-") return def;
+  return v.toFloat();
+}
+static int fieldToInt(const String& data, const char* key, int def = 0) {
+  String v = extractField(data, key);
+  if (v == "-") return def;
+  return v.toInt();
+}
 void receivedCallback(uint32_t from, String &msg) {
   int idx         = msg.indexOf(" ");
   String nodeName = msg.substring(0, idx);
@@ -233,6 +260,16 @@ void receivedCallback(uint32_t from, String &msg) {
   else
     Serial.printf("Connection: VIA NODE %u\n", parentId);
   Serial.println("Data: " + data);
+  {
+    String blatStr = extractField(data, "BaseLat:");
+    String blngStr = extractField(data, "BaseLng:");
+    int    bokVal  = fieldToInt(data, "BaseOk:");
+    int    navVal  = fieldToInt(data, "NavOn:");
+    Serial.printf("Base: %s, %s  [%s]   Nav: %s\n",
+      blatStr.c_str(), blngStr.c_str(),
+      bokVal ? "LOCKED" : "CAPTURING",
+      navVal ? "ACTIVE" : "STANDBY");
+  }
   if (data.indexOf("Panic:1") >= 0) {
     Serial.println("\n!!!!! SOS ALERT !!!!!");
     Serial.printf("TEAM MEMBER: %s  — PANIC BUTTON PRESSED\n", nodeName.c_str());
@@ -240,33 +277,12 @@ void receivedCallback(uint32_t from, String &msg) {
   Serial.printf("TOTAL CLIENTS: %d\n", nodeCount);
 }
 
-static String extractField(const String& data, const char* key) {
-  int start = data.indexOf(key);
-  if (start < 0) return "-";
-  start += strlen(key);
-  int end = data.indexOf(" ", start);
-  if (end < 0) end = data.length();
-  return data.substring(start, end);
-}
-
-static float fieldToFloat(const String& data, const char* key, float def = 0.0f) {
-  String v = extractField(data, key);
-  if (v == "-") return def;
-  return v.toFloat();
-}
-
-static int fieldToInt(const String& data, const char* key, int def = 0) {
-  String v = extractField(data, key);
-  if (v == "-") return def;
-  return v.toInt();
-}
-
 static String latestDataStr = "{}";
 static int packetsReceived = 0;
 static unsigned long lastPacketMs = 0;
 
 static void updateLatestApiData(const NodeInfo& n) {
-  StaticJsonDocument<1024> doc;
+  StaticJsonDocument<1280> doc;
   const String& d = n.data;
 
   float lat = fieldToFloat(d, "Lat:");
@@ -289,6 +305,10 @@ static void updateLatestApiData(const NodeInfo& n) {
   int panic = fieldToInt(d, "Panic:");
   int rssi  = fieldToInt(d, "RSSI:");
   String navState = extractField(d, "Nav:");
+  float  baseLat   = fieldToFloat(d, "BaseLat:");
+  float  baseLng   = fieldToFloat(d, "BaseLng:");
+  int    baseOk    = fieldToInt(d, "BaseOk:");
+  int    navOn     = fieldToInt(d, "NavOn:");
 
   JsonObject gps = doc.createNestedObject("gps");
   gps["valid"]      = gpsFix == 1;
@@ -316,6 +336,12 @@ static void updateLatestApiData(const NodeInfo& n) {
   nav["state"]         = navState;
   nav["heading_src"]   = "MESH";
   nav["bias_z"]        = gz;
+  nav["active"]        = navOn == 1;
+
+  JsonObject base = doc.createNestedObject("base");
+  base["lat"]    = baseLat;
+  base["lng"]    = baseLng;
+  base["locked"] = baseOk == 1;
 
   JsonObject hrObj = doc.createNestedObject("hr");
   hrObj["valid"]  = true;
@@ -331,6 +357,102 @@ static void updateLatestApiData(const NodeInfo& n) {
   packetsReceived++;
   doc["timestamp"] = millis();
   doc["packetNum"] = packetsReceived;
+
+  latestDataStr = "";
+  serializeJson(doc, latestDataStr);
+  lastPacketMs = millis();
+}
+
+
+// ════════════════════════════════════════════════════════════
+//  LORA FIELD EXTRACTOR  (key=value,... format)
+// ════════════════════════════════════════════════════════════
+static String extractLoRaField(const String& data, const char* key) {
+  String searchKey = String(key) + "=";
+  int start = data.indexOf(searchKey);
+  if (start < 0) return "-";
+  start += searchKey.length();
+  int end = data.indexOf(",", start);
+  if (end < 0) end = data.length();
+  return data.substring(start, end);
+}
+
+// ════════════════════════════════════════════════════════════
+//  UPDATE API FROM LORA PACKET
+//  LoRa payload: name=X,lat=F,lon=F,hdg=F,dist=F,rel=F,
+//                btemp=F,sats=I,gps=I,atemp=F,thmax=F,
+//                co2=F,co=I,vstatus=S,vdist=F,alert=S,
+//                buzzer=I,panic=I,rssi=I,
+//                blat=F,blng=F,bok=I,nav=I
+// ════════════════════════════════════════════════════════════
+static void updateLatestApiDataFromLoRa(const char* payload, int loraRssi) {
+  String d = String(payload);
+
+  float  lat    = extractLoRaField(d, "lat").toFloat();
+  float  lon    = extractLoRaField(d, "lon").toFloat();
+  float  hdg    = extractLoRaField(d, "hdg").toFloat();
+  float  dist   = extractLoRaField(d, "dist").toFloat();
+  float  rel    = extractLoRaField(d, "rel").toFloat();
+  float  btemp  = extractLoRaField(d, "btemp").toFloat();
+  int    sats   = extractLoRaField(d, "sats").toInt();
+  int    gpsFix = extractLoRaField(d, "gps").toInt();
+  int    panic  = extractLoRaField(d, "panic").toInt();
+  int    nodeRssi = extractLoRaField(d, "rssi").toInt();
+  float  blat   = extractLoRaField(d, "blat").toFloat();
+  float  blng   = extractLoRaField(d, "blng").toFloat();
+  int    bok    = extractLoRaField(d, "bok").toInt();
+  int    navOn  = extractLoRaField(d, "nav").toInt();
+  String navSt  = extractLoRaField(d, "navst");
+  if (navSt == "-") navSt = navOn ? "FORWARD" : "STANDBY";
+  String name   = extractLoRaField(d, "name");
+  if (name == "-") name = "LORA_NODE";
+
+  StaticJsonDocument<1280> doc;
+
+  JsonObject gps = doc.createNestedObject("gps");
+  gps["valid"]      = gpsFix == 1;
+  gps["lat"]        = lat;
+  gps["lng"]        = lon;
+  gps["alt"]        = 0.0f;
+  gps["speed"]      = 0.0f;
+  gps["satellites"] = sats;
+
+  JsonObject imu = doc.createNestedObject("imu");
+  imu["valid"]   = false;
+  imu["accel_x"] = 0.0f; imu["accel_y"] = 0.0f; imu["accel_z"] = 0.0f;
+  imu["gyro_x"]  = 0.0f; imu["gyro_y"]  = 0.0f; imu["gyro_z"]  = 0.0f;
+  imu["temp"]    = btemp;
+
+  JsonObject nav = doc.createNestedObject("nav");
+  nav["fused_heading"] = hdg;
+  nav["bearing"]       = hdg;
+  nav["rel_bearing"]   = rel;
+  nav["distance"]      = dist;
+  nav["state"]         = navSt;
+  nav["heading_src"]   = "LORA";
+  nav["bias_z"]        = 0.0f;
+  nav["active"]        = navOn == 1;
+
+  JsonObject base = doc.createNestedObject("base");
+  base["lat"]    = blat;
+  base["lng"]    = blng;
+  base["locked"] = bok == 1;
+
+  JsonObject hrObj = doc.createNestedObject("hr");
+  hrObj["valid"]  = false;
+  hrObj["finger"] = false;
+  hrObj["bpm"]    = 0;
+
+  JsonObject meta = doc.createNestedObject("meta");
+  meta["node_name"] = name;
+  meta["node_id"]   = 0;
+  meta["rssi"]      = loraRssi;   // LoRa RSSI at base station RX
+  meta["panic"]     = panic;
+
+  packetsReceived++;
+  doc["timestamp"]  = millis();
+  doc["packetNum"]  = packetsReceived;
+  doc["transport"]  = "LORA";
 
   latestDataStr = "";
   serializeJson(doc, latestDataStr);
@@ -803,6 +925,48 @@ html,body{
       </div>
     </div>
 
+    <!-- Base Station -->
+    <div class="panel">
+      <div class="ph">
+        <div class="ph-left">
+          <div class="ph-label">Return Point</div>
+          <div class="ph-title">Base Station</div>
+        </div>
+        <span class="tag" id="baseLockTag">CAPTURING</span>
+      </div>
+      <div class="gps-grid" style="margin-bottom:8px">
+        <div class="gps-cell"><div class="gc-label">BASE LAT</div><div class="gc-val b" id="baseLat">--</div></div>
+        <div class="gps-cell"><div class="gc-label">BASE LNG</div><div class="gc-val b" id="baseLng">--</div></div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <div class="gps-cell" style="flex:1;text-align:center">
+          <div class="gc-label">STATUS</div>
+          <div class="gc-val" id="baseStatus">--</div>
+        </div>
+        <div class="gps-cell" style="flex:1;text-align:center">
+          <div class="gc-label">NAVIGATION</div>
+          <div class="gc-val" id="navActiveEl">--</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:8px">
+        <div class="gc-label" style="margin-bottom:4px">DISTANCE TO BASE</div>
+        <div style="display:flex;align-items:baseline;gap:6px">
+          <div style="font-size:1.6rem;font-weight:700;color:var(--green);font-family:var(--mono)" id="bsDist">--</div>
+          <div style="font-size:.7rem;color:var(--muted)">METRES</div>
+        </div>
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <div class="gps-cell" style="flex:1;text-align:center">
+            <div class="gc-label">BEARING</div>
+            <div class="gc-val p" id="bsBearing">--</div>
+          </div>
+          <div class="gps-cell" style="flex:1;text-align:center">
+            <div class="gc-label">REL BEARING</div>
+            <div class="gc-val a" id="bsRel">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Tilt / Accel -->
     <div class="panel">
       <div class="ph">
@@ -953,7 +1117,7 @@ html,body{
           <div class="drow"><span class="dk">UPTIME</span><span class="dv g" id="statUp">--</span></div>
           <div class="drow"><span class="dk">INTERVAL</span><span class="dv" id="statInterval">--</span></div>
           <div class="drow"><span class="dk">LAST RSSI</span><span class="dv b" id="statRssi">--</span></div>
-          <div class="drow"><span class="dk">TRANSPORT</span><span class="dv p">MESH</span></div>
+          <div class="drow"><span class="dk">TRANSPORT</span><span class="dv p" id="statTransport">MESH</span></div>
         </div>
       </div>
     </div>
@@ -1251,6 +1415,26 @@ function updateUI(d){
   gpsTag.textContent=gv?'VALID FIX':'NO FIX';
   gpsTag.className='tag '+(gv?'g':'r');
 
+  // Base station panel
+  var base = d.base || {};
+  var baseLocked = base.locked || false;
+  document.getElementById('baseLat').textContent = baseLocked ? (base.lat||0).toFixed(6) : '--';
+  document.getElementById('baseLng').textContent = baseLocked ? (base.lng||0).toFixed(6) : '--';
+  var bsTag = document.getElementById('baseLockTag');
+  bsTag.textContent = baseLocked ? 'LOCKED' : 'CAPTURING';
+  bsTag.className = 'tag ' + (baseLocked ? 'g' : 'a');
+  var bsEl = document.getElementById('baseStatus');
+  bsEl.textContent = baseLocked ? 'LOCKED' : 'CAPTURING';
+  bsEl.className = 'gc-val ' + (baseLocked ? 'g' : 'a');
+  var navActEl = document.getElementById('navActiveEl');
+  navActEl.textContent = nav.active ? 'ACTIVE' : 'STANDBY';
+  navActEl.className = 'gc-val ' + (nav.active ? 'g' : 'p');
+  var dist = nav.distance || 0;
+  document.getElementById('bsDist').textContent = dist.toFixed(1);
+  document.getElementById('bsDist').style.color = dist < 5 ? 'var(--green)' : dist < 30 ? 'var(--amber)' : 'var(--red)';
+  document.getElementById('bsBearing').textContent = (nav.bearing||0).toFixed(1) + '°';
+  document.getElementById('bsRel').textContent = (nav.rel_bearing >= 0 ? '+' : '') + (nav.rel_bearing||0).toFixed(1) + '°';
+
   // IMU
   if(imu.valid){
     var ax=imu.accel_x||0,ay=imu.accel_y||0,az=imu.accel_z||0;
@@ -1343,6 +1527,12 @@ function updateUI(d){
   document.getElementById('tkUp').textContent=Math.floor(upSec/60)+'m '+(upSec%60)+'s';
   document.getElementById('statUp').textContent=Math.floor(upSec/60)+'m '+(upSec%60)+'s';
 
+  // Transport label
+  var transport = d.transport || (nav.heading_src === 'LORA' ? 'LORA' : 'MESH');
+  var tEl = document.getElementById('statTransport');
+  tEl.textContent = transport;
+  tEl.className   = 'dv ' + (transport === 'LORA' ? 'a' : 'p');
+
   // Interval estimate
   if(prevPktMs>0){
     var intv=Math.round((lastPktMs-prevPktMs)/100)/10;
@@ -1432,14 +1622,15 @@ void setup() {
   Serial.printf("[WiFi] STA IP: %s\n",  WiFi.localIP().toString().c_str());
   Serial.printf("[WiFi] Dashboard: http://%s/\n", WiFi.softAPIP().toString().c_str());
 
-#if !USE_ESP_NOW_ONLY
+  // LoRa RX — always active; receives from mesh nodes that fell back to LoRa
   loraReady = initLoRaRX();
-  if (!loraReady) Serial.println("[LoRa] DISABLED — init failed");
-#else
-  Serial.println("[LoRa] Disabled by USE_ESP_NOW_ONLY flag — mesh only");
-#endif
+  if (loraReady) {
+    Serial.println("[LoRa] RX active — will receive packets from nodes in fallback mode");
+  } else {
+    Serial.println("[LoRa] Init failed — LoRa RX unavailable");
+  }
 
-  Serial.printf("[READY] USE_ESP_NOW_ONLY=%s\n", USE_ESP_NOW_ONLY ? "true" : "false");
+  Serial.println("[READY] Mesh primary + LoRa RX fallback ready");
 }
 
 
@@ -1450,8 +1641,5 @@ void loop() {
   mesh.update();
   cleanupNodes();
   server.handleClient();
-
-#if !USE_ESP_NOW_ONLY
   if (loraReady) processLoRaPackets();
-#endif
 }
